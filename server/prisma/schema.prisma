@@ -1,0 +1,364 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 租户表
+model Tenant {
+  id         String    @id @default(uuid())
+  tenantName String
+  // ⚠️ tenantCode 唯一约束由数据库层部分唯一索引保证：
+  //    CREATE UNIQUE INDEX "Tenant_tenantCode_unique" ON "Tenant" ("tenantCode") WHERE "deletedAt" IS NULL;
+  //    已软删除的行不参与唯一校验，允许新建同名租户。
+  tenantCode String
+  scope      String    @default("tenant") // "system" | "tenant" | "experience"
+  status     Boolean   @default(true)
+  adminId    String?   // 管理员用户ID
+  deletedAt  DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  admin  User?   @relation("TenantAdmin", fields: [adminId], references: [id], onDelete: SetNull)
+  users  User[]
+  roles  Role[]
+  groups Group[]
+
+  // 多维表格关系查询辅助
+  tables  DynamicTable[]
+  fields  DynamicField[]
+  records DynamicRecord[]
+  mirrors TableMirror[]
+  relations GroupRelation[]
+
+  @@index([deletedAt]) // 全局回收站 / 定时清理过期数据
+}
+
+// 🔥 支持层级嵌套的群组表（树形结构）
+model Group {
+  id          String    @id @default(uuid())
+  groupName   String // 例如：总公司、分公司、财务部、项目A
+  // ⚠️ groupCode 唯一约束由数据库层部分唯一索引保证：
+  //    CREATE UNIQUE INDEX "Group_tenantId_groupCode_unique" ON "Group" ("tenantId", "groupCode") WHERE "deletedAt" IS NULL;
+  //    同租户内未删除的 groupCode 唯一，不同租户可以有同名群组（如各租户各自有 "sales" 部门）。
+  groupCode   String
+  description String?   @db.Text  // ⭐ 新增：部门/团队职责说明
+  tenantId    String
+  parentId    String? // 🔥 父级群组ID（顶级为 null）
+  path        String? // 物化路径，如 "/ROOT_GROUP/分公司/财务部"，用于快速子树查询
+  status      Boolean   @default(true)
+  public      Boolean   @default(false) // 对外公示：租户内所有群组可见此群组存在
+  deletedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  // 关系
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent          Group?          @relation("GroupHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Group[]         @relation("GroupHierarchy")
+  users           UserGroup[]
+  sourceOfMirrors TableMirror[]   @relation("MirrorSourceGroup")
+  relationsFrom   GroupRelation[] @relation("RelationFrom")
+  relationsTo     GroupRelation[] @relation("RelationTo")
+
+  @@index([tenantId, deletedAt]) // 租户下按删除状态查询（最常用）
+  @@index([path])
+  @@index([public])              // 公开群组快速搜索
+  @@index([deletedAt])           // 全局回收站 / 定时清理
+}
+
+// 用户 <-> 群组 多对多
+model UserGroup {
+  id      String @id @default(uuid())
+  userId  String
+  groupId String
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+}
+
+// 群组联系 — 记录群组之间的纽带关系
+model GroupRelation {
+  id          String   @id @default(uuid())
+  fromGroupId String                              // 发起方群组
+  toGroupId   String                              // 目标方群组（通常是公开群组）
+  status      String   @default("pending")        // pending | active | rejected
+  note        String?  @db.VarChar(200)            // 申请人备注（限 200 字）
+  tenantId    String
+  createdBy   String?                              // 发起人 userId
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  fromGroup Group  @relation("RelationFrom", fields: [fromGroupId], references: [id], onDelete: Cascade)
+  toGroup   Group  @relation("RelationTo", fields: [toGroupId], references: [id], onDelete: Cascade)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator   User?  @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([fromGroupId, toGroupId])
+  @@index([toGroupId, status])
+  @@index([fromGroupId])
+  @@map("group_relation")
+}
+
+// 角色表
+model Role {
+  id          String    @id @default(uuid())
+  roleName    String
+  // ⚠️ roleCode 唯一约束由数据库层部分唯一索引保证：
+  //    CREATE UNIQUE INDEX "Role_tenantId_roleCode_unique" ON "Role" ("tenantId", "roleCode") WHERE "deletedAt" IS NULL;
+  //    同租户内未删除的 roleCode 唯一，不同租户可以有同名角色（预设 shared 角色除外，其归属于系统租户）。
+  roleCode    String
+  description String?   @db.Text
+  scope       String    @default("tenant") // "system" | "shared" | "tenant"
+  tenantId    String    // shared 角色归属于系统租户
+  status      Boolean   @default(true)
+  deletedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant      Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@index([tenantId, deletedAt]) // 租户下按删除状态查询
+  @@index([deletedAt])           // 全局回收站 / 定时清理
+}
+
+// 权限菜单表
+model Permission {
+  id        String   @id @default(uuid())
+  permName  String
+  permCode  String   @unique
+  parentId  String?
+  type      Int // 1=菜单 2=按钮
+  sort      Int      @default(0)
+  scope     String   @default("tenant") // "system" | "tenant"
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  roles RolePermission[]
+}
+
+// 角色-权限关联
+model RolePermission {
+  id           String @id @default(uuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+// 用户表
+model User {
+  id          String    @id @default(uuid())
+  // ⚠️ username 唯一约束由数据库层部分唯一索引保证：
+  //    CREATE UNIQUE INDEX "User_username_unique" ON "User" ("username") WHERE "deletedAt" IS NULL;
+  //    已软删除的行不参与唯一校验，允许新建同名用户。
+  username    String
+  password    String
+  nickname    String?
+  avatar      String?
+  email       String?
+  phone       String?
+  tenantId    String?
+  status      Boolean   @default(true)
+  lastLoginAt DateTime?
+  profile     Json?
+  deletedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant?         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  managedTenants  Tenant[]        @relation("TenantAdmin")
+  roles           UserRole[]
+  groups          UserGroup[]
+  tables          DynamicTable[]
+  fields          DynamicField[]
+  records         DynamicRecord[]
+  mirrors         TableMirror[]
+  createdRelations GroupRelation[]
+
+  @@index([tenantId, deletedAt]) // 租户下按删除状态查询
+  @@index([deletedAt])           // 全局回收站 / 定时清理
+}
+
+// 用户-角色关联
+model UserRole {
+  id     String @id @default(uuid())
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+}
+
+// ------------------------------------
+// 2. 动态表 = 多维表格「表」
+// ------------------------------------
+model DynamicTable {
+  id          String    @id @default(uuid())
+  tableId     String    @unique // 形如 tbl_xxxx
+  name        String // 表名：客户表、订单表
+  description String?  @db.Text
+  tenantId    String
+  groupId     String?
+  createdBy   String? // 哪个用户创建的
+  deletedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator User?           @relation(fields: [createdBy], references: [id], onDelete: NoAction)
+  mirrors TableMirror[]
+  refs    FieldReference[]
+
+  // ⚠️ 同群组下表名唯一约束由数据库层部分唯一索引保证：
+  //    CREATE UNIQUE INDEX "dynamic_table_groupId_name_unique"
+  //      ON "dynamic_table" ("groupId", "name") WHERE "deletedAt" IS NULL;
+  //    已软删除的行不参与唯一校验，允许新建同名表。
+  //    注意：PostgreSQL 中 NULL != NULL，所以 groupId=NULL 的多行不冲突。
+  @@index([tenantId, deletedAt]) // 租户下按删除状态查询
+  @@index([groupId, deletedAt])  // 群组下按删除状态查询
+  @@index([deletedAt])           // 全局回收站 / 定时清理
+  @@map("dynamic_table")
+}
+
+// ------------------------------------
+// 3. 动态字段 = 「列」
+// ------------------------------------
+model DynamicField {
+  id          String    @id @default(uuid())
+  fieldId     String    @unique // 形如 fld_xxxx
+  name        String // 列名：客户姓名、电话、金额
+  type        String // text | number | date | select | checkbox | user | attachment | reference
+  options     Json? // 下拉选项（如果是 select）
+  description String?  @db.Text
+  tableId     String
+  tenantId    String
+  groupId     String?
+  createdBy   String? // 哪个用户创建的
+  deletedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator User?        @relation(fields: [createdBy], references: [id], onDelete: NoAction)
+  reference FieldReference?
+
+  // ⚠️ 同表内字段名唯一约束由数据库层部分唯一索引保证：
+  //    CREATE UNIQUE INDEX "dynamic_field_tableId_name_unique"
+  //      ON "dynamic_field" ("tableId", "name") WHERE "deletedAt" IS NULL;
+  //    已软删除的字段不参与唯一校验，允许新建同名字段。
+  @@index([tableId, deletedAt])  // 表内按删除状态查询（最常用）
+  @@index([tenantId, deletedAt]) // 租户下按删除状态查询
+  @@index([deletedAt])           // 全局回收站 / 定时清理
+  @@map("dynamic_field")
+}
+
+// ------------------------------------
+// 4. 动态记录 = 「行」
+// ------------------------------------
+model DynamicRecord {
+  id          String    @id @default(uuid())
+  recordId    String    @unique // 形如 rec_xxxx
+  tableId     String
+  tenantId    String
+  groupId     String?
+  data        Json      @db.JsonB // 核心：所有字段值存在这里
+  description String?  @db.Text
+  createdBy   String? // 哪个用户创建的
+  deletedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator User?        @relation(fields: [createdBy], references: [id], onDelete: NoAction)
+
+  @@index([tableId, deletedAt])  // 表内按删除状态查询（最常用）
+  @@index([tenantId, deletedAt]) // 租户下按删除状态查询
+  @@index([deletedAt])           // 全局回收站 / 定时清理
+  @@map("dynamic_record")
+}
+
+// ------------------------------------
+// 5. 字段引用 — 引用目标表的记录字段值
+// ------------------------------------
+model FieldReference {
+  id            String   @id @default(uuid())
+  refId         String   @unique                    // ref_xxxx
+  fieldId       String   @unique                    // 关联的 DynamicField
+  sourceTableId String                              // 引用的目标表 tableId
+  sourceFields  Json     @db.JsonB                  // ["姓名", "工号"] 源表字段，用于 lookup 搜索和拼接标签
+  displayField  String   @default("")               // 优先展示字段名，为空则用 sourceFields 拼接
+  valueField    String                              // 值字段 "recordId"
+  filterJson    Json?    @db.JsonB                  // 可选前置过滤
+  description   String?  @db.Text
+  groupId       String?
+  createdBy     String?
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+
+  field       DynamicField @relation(fields: [fieldId], references: [fieldId], onDelete: Cascade)
+  sourceTable DynamicTable @relation(fields: [sourceTableId], references: [tableId], onDelete: Cascade)
+
+  @@map("field_reference")
+}
+
+// ------------------------------------
+// 6. 表镜像 — 不存储数据，仅作为母表的视图/投影
+//    控制可见字段 + 目标群组，实现跨群组数据查阅
+// ------------------------------------
+model TableMirror {
+  id            String   @id @default(uuid())
+  mirrorId      String   @unique // mir_xxxx
+  sourceTableId String   // 母表 tableId
+  sourceGroupId String?  // 来源群组（谁推送/共享过来的），冗余字段方便 group 反向查镜像
+  name          String   // 镜像名称
+  description   String?  @db.Text
+  groupId       String?  // 目标群组（可为空，为空表示未分配群组）
+  visibleFields Json     @db.JsonB // ["fld_xxx", "fld_yyy"] 可见字段列表
+  status        String   @default("accepted") // pending | accepted — 共享审批（拒绝直接删除）
+  tenantId      String
+  createdBy     String?
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+
+  sourceTable DynamicTable @relation(fields: [sourceTableId], references: [tableId], onDelete: Cascade)
+  sourceGroup Group?       @relation("MirrorSourceGroup", fields: [sourceGroupId], references: [id], onDelete: SetNull)
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator     User?        @relation(fields: [createdBy], references: [id], onDelete: NoAction)
+
+  @@index([groupId, status])
+  @@index([sourceGroupId])
+  @@unique([sourceTableId, groupId]) // 同一母表对同一目标群组只有一个镜像
+  @@unique([groupId, name])          // 同群组下镜像名唯一（groupId=NULL时各NULL视为不同）
+  @@map("table_mirror")
+}
+
+// ------------------------------------
+// 7. 审计日志
+// ------------------------------------
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  action     String   // CREATE | UPDATE | DELETE | RESTORE
+  resource   String   // Tenant | User | Role | Group | DynamicTable | DynamicField | DynamicRecord
+  resourceId String
+  oldValue   Json?    @db.JsonB
+  newValue   Json?    @db.JsonB
+  tenantId   String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, resource])
+  @@index([resource, resourceId])
+  @@index([createdAt])
+  @@map("audit_log")
+}

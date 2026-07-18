@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Auth Core</title>
+<style>
+  :root { --bg: #fff; --fg: #18181b; --muted: #71717a; --border: #e4e4e7; --primary: #18181b; --primary-fg: #fafafa; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; cursor: pointer; }
+  button:active { opacity: .7; }
+  button:disabled { opacity: .5; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid transparent; font-weight: 500; outline: none; transition: opacity .2s, background .15s, border-color .15s; white-space: nowrap; flex-shrink: 0; }
+  .btn-primary { background: var(--primary); color: var(--primary-fg); }
+  .btn-primary:hover { opacity: .9; }
+  .btn-outline { border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+  .btn-outline:hover { background: #f4f4f5; }
+  .btn-ghost { background: transparent; color: var(--fg); }
+  .btn-ghost:hover { background: #f4f4f5; }
+  .btn-sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
+  .btn-md { height: 40px; padding: 0 20px; font-size: 14px; }
+  .btn-lg { height: 48px; padding: 0 28px; font-size: 16px; }
+  .input { width: 100%; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); padding: 0 12px; font-size: 14px; outline: none; color: var(--fg); }
+  .input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(24,24,27,.1); }
+  .input::placeholder { color: #a1a1aa; }
+  .page { min-height: 100vh; display: flex; flex-direction: column; }
+  .nav { border-bottom: 1px solid rgba(228,228,231,.6); background: rgba(255,255,255,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); padding: 0 24px; position: sticky; top: 0; z-index: 40; }
+  .nav-inner { max-width: 1152px; margin: 0 auto; display: flex; height: 56px; align-items: center; justify-content: space-between; }
+  .nav-logo { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+  .nav-btns { display: flex; gap: 8px; }
+  .hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 24px; text-align: center; }
+  .hero h1 { font-size: 52px; font-weight: 700; line-height: 1.1; letter-spacing: -0.025em; color: var(--fg); margin-bottom: 12px; }
+  .hero h1 span { display: block; color: var(--muted); font-weight: 400; font-size: 42px; }
+  .hero p { font-size: 18px; color: var(--muted); max-width: 540px; margin: 0 auto 40px; line-height: 1.7; }
+  .hero-btns { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .feat { border-top: 1px solid #f4f4f5; padding: 80px 24px; }
+  .feat-inner { max-width: 1024px; margin: 0 auto; }
+  .feat-hdr { text-align: center; margin-bottom: 48px; }
+  .feat-hdr h2 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 12px; }
+  .feat-hdr p { color: var(--muted); font-size: 16px; }
+  .feat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+  .feat-card { border-radius: 14px; border: 1px solid rgba(228,228,231,.6); background: #fff; padding: 24px; transition: border-color .2s, box-shadow .2s; }
+  .feat-card:hover { border-color: #d4d4d8; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .feat-card .icon-box { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border-radius: 10px; background: #f4f4f5; margin-bottom: 16px; }
+  .feat-card .icon-box svg { width: 20px; height: 20px; color: #52525b; }
+  .feat-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .feat-card p { font-size: 14px; color: var(--muted); line-height: 1.6; }
+  .footer { border-top: 1px solid #f4f4f5; padding: 32px 24px; text-align: center; font-size: 13px; color: #a1a1aa; }
+  .modal-overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.05); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+  .modal-box { position: relative; width: 100%; max-width: 380px; background: var(--bg); border-radius: 14px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04); }
+  .modal-box h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; }
+  .modal-box .desc { font-size: 14px; color: var(--muted); margin-bottom: 24px; }
+  .modal-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; border: none; background: transparent; color: #a1a1aa; font-size: 16px; cursor: pointer; }
+  .modal-close:hover { background: #f4f4f5; color: var(--fg); }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+  .field:last-of-type { margin-bottom: 20px; }
+  .switch { font-size: 13px; text-align: center; color: var(--muted); margin-top: 14px; }
+  .switch button { background: none; border: none; text-decoration: underline; cursor: pointer; font-size: 13px; padding: 0; color: var(--fg); }
+  .w-full { width: 100%; }
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 36px; } .hero h1 span { font-size: 28px; }
+    .hero p { font-size: 16px; }
+    .feat-hdr h2 { font-size: 24px; }
+    .nav { padding: 0 16px; }
+    .hero { padding: 60px 16px; }
+    .feat { padding: 60px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <span class="nav-logo">Auth Core</span>
+      <div class="nav-btns">
+        <button class="btn btn-ghost btn-sm" id="nav-login">登录</button>
+        <button class="btn btn-primary btn-sm" id="nav-register">免费注册</button>
+      </div>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div style="max-width:720px">
+      <h1>企业级多租户<span>权限管理平台</span></h1>
+      <p>为 SaaS 应用提供开箱即用的认证、授权、组织架构与动态数据表能力。轻量、安全、可扩展。</p>
+      <div class="hero-btns">
+        <button class="btn btn-primary btn-lg" id="hero-register">免费注册 <span style="margin-left:8px">→</span></button>
+        <button class="btn btn-outline btn-lg" id="hero-login">登录</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="feat">
+    <div class="feat-inner">
+      <div class="feat-hdr"><h2>为什么选择 Auth Core</h2><p>一套系统，覆盖 SaaS 后端所有核心能力</p></div>
+      <div class="feat-grid">
+        <div class="feat-card">
+          <div class="icon-box"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg></div>
+          <h3>多租户架构</h3><p>系统租户与业务租户隔离，数据安全有保障。</p>
+        </div>
+        <div class="feat-card">
+          <div class="icon-box"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg></div>
+          <h3>灵活 RBAC</h3><p>角色、权限、群组三级管控，精细到按钮级别。</p>
+        </div>
+        <div class="feat-card">
+          <div class="icon-box"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg></div>
+          <h3>组织管理</h3><p>树形群组结构，适配任意组织架构。</p>
+        </div>
+        <div class="feat-card">
+          <div class="icon-box"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg></div>
+          <h3>动态表格</h3><p>像 Notion 一样自由创建数据表，字段类型丰富。</p>
+        </div>
+        <div class="feat-card">
+          <div class="icon-box"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></svg></div>
+          <h3>预设模板</h3><p>内置租户管理员、普通成员等预设角色，开箱即用。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">Auth Core &copy; 2026</footer>
+
+</div>
+
+<!-- Login Modal -->
+<div id="login-modal" class="modal-overlay" style="display:none">
+  <div class="modal-backdrop" id="login-backdrop"></div>
+  <div class="modal-box">
+    <button class="modal-close" id="login-close">&times;</button>
+    <h2>登录</h2>
+    <p class="desc">使用您的账号登录 Auth Core</p>
+    <div class="field">
+      <label>用户名</label>
+      <input id="login-user" class="input" placeholder="admin" autocomplete="username"/>
+    </div>
+    <div class="field">
+      <label>密码</label>
+      <input id="login-pass" class="input" type="password" placeholder="admin123" autocomplete="current-password"/>
+    </div>
+    <button id="login-btn" class="btn btn-primary btn-md w-full">登录</button>
+  </div>
+</div>
+
+<!-- Register Modal -->
+<div id="reg-modal" class="modal-overlay" style="display:none">
+  <div class="modal-backdrop" id="reg-backdrop"></div>
+  <div class="modal-box">
+    <button class="modal-close" id="reg-close">&times;</button>
+    <h2>注册</h2>
+    <p class="desc">创建您的账号，开始使用 Auth Core</p>
+    <div class="field">
+      <label>用户名 *</label>
+      <input id="reg-user" class="input" placeholder="用户名"/>
+    </div>
+    <div class="field">
+      <label>密码 *</label>
+      <input id="reg-pass" class="input" type="password" placeholder="密码"/>
+    </div>
+    <div class="field">
+      <label>昵称</label>
+      <input id="reg-nick" class="input" placeholder="可选"/>
+    </div>
+    <button id="reg-btn" class="btn btn-primary btn-md w-full">注册</button>
+    <p class="switch">已有账号？<button id="switch-to-login">去登录</button></p>
+  </div>
+</div>
+
+<script>
+(function() {
+  var API = 'http://192.168.1.23:3001/api';
+
+  function $(id) { return document.getElementById(id); }
+
+  function show(id) { $(id).style.display = 'flex'; }
+  function hide(id) { $(id).style.display = 'none'; }
+
+  function openLogin() { show('login-modal'); }
+  function openRegister() { show('reg-modal'); }
+  function closeLogin() { hide('login-modal'); }
+  function closeRegister() { hide('reg-modal'); }
+  function switchToLogin() { closeRegister(); openLogin(); }
+
+  ['nav-login','hero-login'].forEach(function(id) { $(id).addEventListener('click', openLogin); });
+  ['nav-register','hero-register'].forEach(function(id) { $(id).addEventListener('click', openRegister); });
+  $('login-backdrop').addEventListener('click', closeLogin);
+  $('login-close').addEventListener('click', closeLogin);
+  $('reg-backdrop').addEventListener('click', closeRegister);
+  $('reg-close').addEventListener('click', closeRegister);
+  $('switch-to-login').addEventListener('click', switchToLogin);
+
+  $('login-btn').addEventListener('click', function() {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = '登录中...';
+    fetch(API + '/user/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('login-user').value, password: $('login-pass').value })
+    }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.success !== false && d.data) {
+        var u = d.data;
+        localStorage.setItem('auth-core-auth', JSON.stringify({
+          state: { accessToken: u.accessToken, refreshToken: u.refreshToken, user: { id: u.id, username: u.username, nickname: u.nickname, avatar: u.avatar, email: u.email, phone: u.phone }, isLoggedIn: true }, version: 0
+        }));
+        window.location.href = '/app';
+      } else { alert('登录失败: ' + (d.message || '未知错误')); }
+    }).catch(function(e) { alert('请求失败: ' + e.message); })
+    .finally(function() { btn.disabled = false; btn.textContent = '登录'; });
+  });
+
+  $('reg-btn').addEventListener('click', function() {
+    var btn = this;
+    var u = $('reg-user').value, p = $('reg-pass').value;
+    if (!u || !p) { alert('用户名和密码为必填'); return; }
+    btn.disabled = true;
+    btn.textContent = '注册中...';
+    fetch(API + '/user/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p, nickname: $('reg-nick').value || undefined })
+    }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.success !== false) {
+        alert('注册成功，请登录');
+        closeRegister(); openLogin(); $('login-user').value = u;
+      } else { alert('注册失败: ' + (d.message || '未知错误')); }
+    }).catch(function(e) { alert('请求失败: ' + e.message); })
+    .finally(function() { btn.disabled = false; btn.textContent = '注册'; });
+  });
+
+  $('login-pass').addEventListener('keydown', function(e) { if (e.key === 'Enter') $('login-btn').click(); });
+  $('reg-pass').addEventListener('keydown', function(e) { if (e.key === 'Enter') $('reg-btn').click(); });
+})();
+</script>
+
+</body>
+</html>

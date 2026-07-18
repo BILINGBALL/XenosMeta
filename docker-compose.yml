@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: auth-core-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: auth_core
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: auth-core-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: ./server
+    container_name: auth-core-app
+    restart: unless-stopped
+    ports:
+      - '3001:3001'
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: 'postgresql://postgres:123456@postgres:5432/auth_core?schema=public'
+      JWT_ACCESS_SECRET: 'auth-core-access-secret-2026'
+      JWT_REFRESH_SECRET: 'auth-core-refresh-secret-2026'
+      JWT_ACCESS_EXPIRES: '15m'
+      JWT_REFRESH_EXPIRES: '7d'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: ''
+      REDIS_DB: '0'
+      REDIS_PREFIX: 'auth-core:'
+      CORS_ORIGIN: 'http://localhost:3000'
+      PORT: '3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "npx prisma migrate deploy && node -r tsconfig-paths/register dist/app.js"
+
+volumes:
+  pgdata:
+  redisdata:

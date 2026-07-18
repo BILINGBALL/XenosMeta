@@ -1,0 +1,210 @@
+{
+  "timestamp": "2026-06-04T10:08:20.356Z",
+  "summary": {
+    "total": 31,
+    "passed": 31,
+    "failed": 0,
+    "passRate": "100.00%"
+  },
+  "phases": [
+    {
+      "phase": "Phase 1",
+      "tests": [
+        {
+          "name": "创建 ROOT 租户",
+          "status": "PASS",
+          "duration": 52,
+          "details": "ID: ROOT"
+        },
+        {
+          "name": "创建 ROOT_GROUP",
+          "status": "PASS",
+          "duration": 0,
+          "details": "ID: ROOT_GROUP"
+        },
+        {
+          "name": "创建 Admin 用户",
+          "status": "PASS",
+          "duration": 0,
+          "details": "ID: cc768abb-4956-4359-a5ea-c006d2d6545d"
+        },
+        {
+          "name": "创建 ROOT_ADMIN 角色",
+          "status": "PASS",
+          "duration": 0,
+          "details": "ID: 493cb69b-6b72-49f4-ba62-d7032244e71b"
+        },
+        {
+          "name": "Admin 用户分配角色和群组",
+          "status": "PASS",
+          "duration": 0
+        }
+      ]
+    },
+    {
+      "phase": "Phase 2",
+      "tests": [
+        {
+          "name": "创建所有权限",
+          "status": "PASS",
+          "duration": 27,
+          "details": "共 34 个权限"
+        },
+        {
+          "name": "ROOT_ADMIN 角色分配所有权限",
+          "status": "PASS",
+          "duration": 0,
+          "details": "分配 34 个权限"
+        }
+      ]
+    },
+    {
+      "phase": "Phase 3",
+      "tests": [
+        {
+          "name": "创建 Sudelan 租户",
+          "status": "PASS",
+          "duration": 1,
+          "details": "ID: Sudelan"
+        },
+        {
+          "name": "创建 ROOT_Sudelan 根组",
+          "status": "PASS",
+          "duration": 0,
+          "details": "ID: Sudelan_ROOT_GROUP"
+        },
+        {
+          "name": "创建 Sudelan-Admin 用户",
+          "status": "PASS",
+          "duration": 0,
+          "details": "ID: 15b7ecb8-de4d-4e88-a3d0-dfa7b306c9a1"
+        },
+        {
+          "name": "创建 Sudelan_ADMIN 角色",
+          "status": "PASS",
+          "duration": 0,
+          "details": "ID: 1bee4b0d-241d-4da3-bf02-fb813d426326"
+        },
+        {
+          "name": "Sudelan_ADMIN 角色分配权限",
+          "status": "PASS",
+          "duration": 0,
+          "details": "分配 26 个租户级权限"
+        },
+        {
+          "name": "Sudelan-Admin 用户分配角色和群组",
+          "status": "PASS",
+          "duration": 0
+        }
+      ]
+    },
+    {
+      "phase": "Phase 4",
+      "tests": [
+        {
+          "name": "Admin 登录",
+          "status": "PASS",
+          "duration": 99
+        },
+        {
+          "name": "Sudelan-Admin 登录",
+          "status": "PASS",
+          "duration": 80,
+          "details": "Token: eyJhbGciOiJIUzI1NiIs..."
+        },
+        {
+          "name": "创建客户管理表",
+          "status": "PASS",
+          "duration": 160,
+          "details": "TableID: tblhRord6KqSCyU"
+        },
+        {
+          "name": "查询客户管理表",
+          "status": "PASS",
+          "duration": 10,
+          "details": "找到 1 张表"
+        },
+        {
+          "name": "创建字段: 客户姓名",
+          "status": "PASS",
+          "duration": 11,
+          "details": "FieldID: fldgmG9SxUtwEVq"
+        },
+        {
+          "name": "创建字段: 联系电话",
+          "status": "PASS",
+          "duration": 9,
+          "details": "FieldID: fldMVImdJSWRBaq"
+        },
+        {
+          "name": "创建字段: 年龄",
+          "status": "PASS",
+          "duration": 9,
+          "details": "FieldID: fld3sfRLuq9j0e7"
+        },
+        {
+          "name": "创建字段: 生日",
+          "status": "PASS",
+          "duration": 8,
+          "details": "FieldID: fld5jPqlaD1od5n"
+        },
+        {
+          "name": "创建字段: VIP会员",
+          "status": "PASS",
+          "duration": 9,
+          "details": "FieldID: flduDosfU1zlGjW"
+        },
+        {
+          "name": "创建字段: 客户类型",
+          "status": "PASS",
+          "duration": 9,
+          "details": "FieldID: fldYzjPuI11ysXJ"
+        },
+        {
+          "name": "创建字段: 备注",
+          "status": "PASS",
+          "duration": 8,
+          "details": "FieldID: fldUDefSjUTIo8y"
+        },
+        {
+          "name": "查询字段列表",
+          "status": "PASS",
+          "duration": 9,
+          "details": "找到 7 个字段"
+        },
+        {
+          "name": "创建客户记录",
+          "status": "PASS",
+          "duration": 9,
+          "details": "RecordID: recAPWMS88ZwzKp"
+        },
+        {
+          "name": "查询客户记录",
+          "status": "PASS",
+          "duration": 46,
+          "details": "找到 1 条记录"
+        },
+        {
+          "name": "更新客户记录",
+          "status": "PASS",
+          "duration": 10
+        },
+        {
+          "name": "删除客户记录",
+          "status": "PASS",
+          "duration": 8
+        },
+        {
+          "name": "删除字段: 备注",
+          "status": "PASS",
+          "duration": 8
+        },
+        {
+          "name": "删除客户管理表",
+          "status": "PASS",
+          "duration": 8
+        }
+      ]
+    }
+  ]
+}

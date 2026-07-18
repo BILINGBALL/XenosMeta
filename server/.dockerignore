@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.git/
+*.md
+.DS_Store
+.idea/
+scripts/
+tests/

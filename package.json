@@ -1,0 +1,21 @@
+{
+  "name": "auth-core-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Auth Core — multi-tenant RBAC platform with Next.js frontend",
+  "scripts": {
+    "dev:server": "cd server && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "build:server": "cd server && npm run build",
+    "build:web": "cd web && npm run build",
+    "build": "npm run build:server && npm run build:web",
+    "start:server": "cd server && npm start",
+    "start:web": "cd web && npm start",
+    "test:server": "cd server && npm test",
+    "test": "cd server && npm test",
+    "prisma:migrate": "cd server && npm run prisma:migrate",
+    "prisma:gen": "cd server && npm run prisma:gen",
+    "postinstall": "cd server && npm install"
+  }
+}

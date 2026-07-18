@@ -1,0 +1,27 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Next.js
+.next/
+out/
+
+# Build artifacts
+server/dist/
+web/.next/
+
+# Docker
+pgdata/
+redisdata/
+
+# misc
+/tmp
+/out-tsc
+*.swp
+*.swo
+pgvector.zip
