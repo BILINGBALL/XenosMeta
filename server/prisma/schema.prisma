@@ -362,3 +362,29 @@ model AuditLog {
   @@index([createdAt])
   @@map("audit_log")
 }
+
+// ------------------------------------
+// 8. 文件管理
+// ------------------------------------
+model File {
+  id          String    @id @default(uuid())
+  fileId      String    @unique
+  tenantId    String
+  groupId     String?
+  bucket      String
+  objectKey   String
+  filename    String
+  mimeType    String
+  size        Int
+  tags        Json?     @db.JsonB
+  description String?   @db.Text
+  uploadedBy  String?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([groupId])
+  @@index([fileId])
+  @@map("file")
+}

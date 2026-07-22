@@ -16,5 +16,6 @@ router.put('/mirrors/:mirrorId', hasPermission('dynamic:table:edit'), c.updateMi
 router.delete('/mirrors/:mirrorId', hasPermission('dynamic:table:delete'), c.deleteMirror)
 router.post('/mirrors/:mirrorId/records/list', hasPermission('dynamic:record:view'), c.getRecords)
 router.get('/mirrors/:mirrorId/records/:recordId', hasPermission('dynamic:record:view'), c.getRecord)
+router.get('/mirrors/:mirrorId/fields', hasPermission('dynamic:table:view'), c.getFields)
 
 export default router

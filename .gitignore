@@ -2,26 +2,31 @@ node_modules/
 .env
 .env.local
 .env.*.local
-.idea/
+
+# IDE
+.idea/workspace.xml
 .DS_Store
 Thumbs.db
-*.log
 
-# Next.js
-.next/
-out/
+# Logs
+*.log
 
 # Build artifacts
 server/dist/
 web/.next/
+web/tsconfig.tsbuildinfo
+web/next-env.d.ts
 
-# Docker
-pgdata/
-redisdata/
-
-# misc
+# Misc
+pgvector.zip
 /tmp
 /out-tsc
 *.swp
 *.swo
-pgvector.zip
+
+# Claude local settings
+.claude/settings.local.json
+
+# Auth tokens
+scripts/_login.json
+scripts/_token.txt

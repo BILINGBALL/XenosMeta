@@ -17,10 +17,11 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { RefreshCw, Plus, Eye, Edit, Trash2, Columns, Search, Settings, Layers } from 'lucide-react'
 import { toast } from 'sonner'
-import type { DynamicTable, DynamicField, DynamicRecord, FieldType, FieldReference } from '@/types'
+import type { DynamicTable, DynamicField, DynamicRecord, FieldType, FieldReference, TableMirror } from '@/types'
 import { fetchList, postAction } from '@/lib/api-client'
 import { unwrapList } from '@/types'
 import { MirrorPanel } from '@/components/dynamic/mirror-panel'
+import { FilePicker } from '@/components/file/file-picker'
 import { useGroupStore } from '@/stores/group-store'
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
@@ -304,13 +305,21 @@ function RecordForm({
             }
             return <FormField key={fieldId} label={f.name} id={fieldId} value={v} onChange={(x) => onChange?.(f.name, x)} placeholder={f.name} />
 
+          case 'attachment': {
+            return (
+              <div key={fieldId} className="grid gap-1.5">
+                <Label>{f.name}</Label>
+                <FilePicker value={v} onChange={(x) => onChange?.(f.name, x)} readOnly={readOnly} />
+              </div>
+            )
+          }
+
           case 'number':
           case 'date':
-          case 'user':
-          case 'attachment': {
-            const typeMap: Record<string, string> = { number: 'number', date: 'date', user: 'text', attachment: 'text' }
-            const placeholderMap: Record<string, string> = { user: '用户 ID', attachment: '附件 ID' }
-            const labelSuffix = f.type === 'user' ? ' (user)' : f.type === 'attachment' ? ' (attachment)' : ''
+          case 'user': {
+            const typeMap: Record<string, string> = { number: 'number', date: 'date', user: 'text' }
+            const placeholderMap: Record<string, string> = { user: '用户 ID' }
+            const labelSuffix = f.type === 'user' ? ' (user)' : ''
             return (
               <div key={fieldId} className="grid gap-1.5">
                 <Label htmlFor={fieldId}>{f.name}{labelSuffix}</Label>
@@ -451,7 +460,7 @@ function ReferenceConfigForm({
 export function TablePanel() {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
   const store = useDynamicStore()
-  const { tables, fields, records, loading, references, lookupResults, mirrors, outgoingMirrors, incomingMirrors } = store
+  const { tables, fields, records, loading, references, lookupResults, mirrors, outgoingMirrors, incomingMirrors, recordsTotal, recordsPage, recordsPageSize } = store
   const { groups } = useGroupStore()
 
   const [mainTab, setMainTab] = useState('tables')
@@ -487,6 +496,21 @@ export function TablePanel() {
   const [showRecordDetail, setShowRecordDetail] = useState<DynamicRecord | null>(null)
   const [rFormData, setRFormData] = useState<Record<string, string>>({})
   const [rTenantId, setRTenantId] = useState('')
+
+  // mirror detail dialog
+  const [mirrorDetail, setMirrorDetail] = useState<TableMirror | null>(null)
+  const [mirrorDetailFields, setMirrorDetailFields] = useState<DynamicField[]>([])
+
+  const openMirrorDetail = async (m: TableMirror) => {
+    setMirrorDetail(m)
+    try {
+      const res = await fetchList<any>(`/dynamic/tables/${m.sourceTableId}/fields`)
+      const items = unwrapList(res?.data ?? res)
+      setMirrorDetailFields(items as DynamicField[])
+    } catch {
+      setMirrorDetailFields([])
+    }
+  }
 
   // 当前用户的租户信息
   const [myTenantId, setMyTenantId] = useState('')
@@ -641,13 +665,14 @@ export function TablePanel() {
   const refreshRecords = (tid?: string) => {
     if (!selectedTableId) return
     const t = tid ?? selectedTable?.tenantId ?? rTenantId ?? defaultTenantId
-    store.fetchRecords(selectedTableId, t)
+    const s = useDynamicStore.getState()
+    store.fetchRecords(selectedTableId, t, s.recordsPage, s.recordsPageSize, s.recordsSortField, s.recordsSortOrder)
   }
 
   const selectTable = (t: DynamicTable) => {
     setSelectedTableId(t.tableId)
     store.fetchFields(t.tableId)
-    store.fetchRecords(t.tableId, t.tenantId)
+    store.fetchRecords(t.tableId, t.tenantId, 1, 20)
     store.fetchReferences(t.tableId)
     store.fetchMirrorsByTable(t.tableId)
     setRTenantId(t.tenantId)
@@ -891,7 +916,7 @@ export function TablePanel() {
                             <TableCell className="text-xs">{groupNameMap.get(m.groupId || '') || m.groupId || '—'}</TableCell>
                             <TableCell>
                               <div className="flex gap-0.5">
-                                <ActionButton variant="ghost" size="icon-sm" onClick={() => { const t = tables.find(x => x.tableId === m.sourceTableId); if (t) selectTable(t) }} title="查看源表"><Eye className="h-3 w-3" /></ActionButton>
+                                <ActionButton variant="ghost" size="icon-sm" onClick={() => openMirrorDetail(m)} title="查看镜像详情"><Eye className="h-3 w-3" /></ActionButton>
                                 <ActionButton variant="ghost" size="icon-sm" onClick={async () => { await store.deleteMirror(m.mirrorId); store.fetchAllMirrors(); store.fetchCategorizedMirrors() }} title="删除镜像"><Trash2 className="h-3 w-3" /></ActionButton>
                               </div>
                             </TableCell>
@@ -927,7 +952,7 @@ export function TablePanel() {
                             <TableCell className="text-xs">{groupNameMap.get(m.sourceGroupId || '') || m.sourceGroupId || '—'}</TableCell>
                             <TableCell>
                               <div className="flex gap-0.5">
-                                <ActionButton variant="ghost" size="icon-sm" onClick={() => { const t = tables.find(x => x.tableId === m.sourceTableId); if (t) selectTable(t) }} title="查看源表"><Eye className="h-3 w-3" /></ActionButton>
+                                <ActionButton variant="ghost" size="icon-sm" onClick={() => openMirrorDetail(m)} title="查看镜像详情"><Eye className="h-3 w-3" /></ActionButton>
                                 <ActionButton variant="ghost" size="icon-sm" onClick={async () => { await store.deleteMirror(m.mirrorId); store.fetchAllMirrors(); store.fetchCategorizedMirrors() }} title="删除镜像"><Trash2 className="h-3 w-3" /></ActionButton>
                               </div>
                             </TableCell>
@@ -1024,6 +1049,38 @@ export function TablePanel() {
                     </TableBody>
                   </Table>
                 </div>
+                {/* Pagination */}
+                {recordsTotal > recordsPageSize && (
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>共 {recordsTotal} 条记录，第 {recordsPage}/{Math.ceil(recordsTotal / recordsPageSize)} 页</span>
+                    <div className="flex gap-1">
+                      <ActionButton
+                        variant="outline"
+                        size="sm"
+                        disabled={recordsPage <= 1}
+                        onClick={() => {
+                          const s = useDynamicStore.getState()
+                          const t = selectedTable?.tenantId ?? rTenantId ?? defaultTenantId
+                          store.fetchRecords(selectedTableId, t, s.recordsPage - 1, recordsPageSize, s.recordsSortField, s.recordsSortOrder)
+                        }}
+                      >
+                        上一页
+                      </ActionButton>
+                      <ActionButton
+                        variant="outline"
+                        size="sm"
+                        disabled={recordsPage >= Math.ceil(recordsTotal / recordsPageSize)}
+                        onClick={() => {
+                          const s = useDynamicStore.getState()
+                          const t = selectedTable?.tenantId ?? rTenantId ?? defaultTenantId
+                          store.fetchRecords(selectedTableId, t, s.recordsPage + 1, recordsPageSize, s.recordsSortField, s.recordsSortOrder)
+                        }}
+                      >
+                        下一页
+                      </ActionButton>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1065,6 +1122,62 @@ export function TablePanel() {
         <DialogContent className="max-w-xl">
           <DialogHeader><DialogTitle>表详情 — {showTableDetail?.name}</DialogTitle></DialogHeader>
           <pre className="bg-muted rounded p-3 text-xs overflow-auto max-h-96 font-mono">{JSON.stringify(showTableDetail, null, 2)}</pre>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== MIRROR DETAIL DIALOG ===== */}
+      <Dialog open={!!mirrorDetail} onOpenChange={(v) => { if (!v) { setMirrorDetail(null); setMirrorDetailFields([]) } }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>镜像详情 — {mirrorDetail?.name}</DialogTitle>
+            {mirrorDetail?.description && <DialogDescription>{mirrorDetail.description}</DialogDescription>}
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-muted-foreground">源表：</span>
+                <span className="font-medium">{mirrorDetail?.sourceTable?.name || mirrorDetail?.sourceTableId || '—'}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">镜像 ID：</span>
+                <code className="bg-muted px-1 py-0.5 rounded text-xs">{mirrorDetail?.mirrorId}</code>
+              </div>
+              <div>
+                <span className="text-muted-foreground">来源群组：</span>
+                <span>{mirrorDetail?.sourceGroup?.groupName || mirrorDetail?.sourceGroupId || '—'}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">目标群组：</span>
+                <span>{mirrorDetail?.targetGroup?.groupName || mirrorDetail?.groupId || '—'}</span>
+              </div>
+            </div>
+            <div>
+              <span className="text-sm text-muted-foreground">可见字段：</span>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {(mirrorDetail?.visibleFields || []).length === 0 ? (
+                  <span className="text-xs text-muted-foreground">—</span>
+                ) : (
+                  (mirrorDetail?.visibleFields || []).map((fid) => {
+                    const field = mirrorDetailFields.find((f) => f.fieldId === fid)
+                    return (
+                      <Badge key={fid} variant="secondary" className="text-xs">
+                        {field ? `${field.name} (${field.type})` : fid}
+                      </Badge>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+              <div>创建时间：{mirrorDetail?.createdAt ? new Date(mirrorDetail.createdAt).toLocaleString() : '—'}</div>
+              <div>更新时间：{mirrorDetail?.updatedAt ? new Date(mirrorDetail.updatedAt).toLocaleString() : '—'}</div>
+            </div>
+          </div>
+          <DialogFooter>
+            <ActionButton variant="outline" onClick={() => { const t = tables.find(x => x.tableId === mirrorDetail?.sourceTableId); if (t) selectTable(t); setMirrorDetail(null); setMirrorDetailFields([]) }}>
+              查看源表
+            </ActionButton>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

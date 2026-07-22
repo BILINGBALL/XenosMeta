@@ -163,8 +163,18 @@ export class DynamicController {
 
         const filter = req.body?.filter ?? {};
         const {page, pageSize} = paginationSchema.parse(req.query);
+        const sortField = req.query.sortField as string | undefined;
+        const sortOrder = (req.query.sortOrder as string || 'desc') === 'asc' ? 'asc' : 'desc';
         const groupIds = await resolveGroupIds(req, tenantId);
-        const result = await dynamicService.getRecords(tableId, tenantId, groupIds, filter, page, pageSize);
+
+        // Convert sortField name to fieldId (JSONB key)
+        let sortFieldId: string | undefined;
+        if (sortField) {
+            const fieldMap = await getFieldNameMap(tableId, tenantId);
+            sortFieldId = fieldMap[sortField] || sortField;
+        }
+
+        const result = await dynamicService.getRecords(tableId, tenantId, groupIds, filter, page, pageSize, sortFieldId, sortOrder);
         const fieldMap = await getFieldNameMap(tableId, tenantId);
         result.items = convertIdToName(fieldMap, result.items) as any;
         res.json(success(result, "记录列表获取成功"));

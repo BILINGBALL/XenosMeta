@@ -101,9 +101,15 @@ export class MirrorController {
 
         const result = await mirrorService.getRecords(mirrorId, tenantId, groupIds, filter, page, pageSize)
 
-        // 通过镜像的母表做 name ↔ fieldId 转换
+        // 通过镜像的母表做 name ↔ fieldId 转换，但只暴露 visibleFields
         const mirror = await mirrorService.getMirror(mirrorId)
-        const fieldMap = await getFieldNameMap(mirror.sourceTableId, tenantId)
+        const fullFieldMap = await getFieldNameMap(mirror.sourceTableId, tenantId)
+        const visibleFieldIds = new Set(mirror.visibleFields as string[])
+        // 过滤 fieldMap：只保留 visibleFields 中的字段
+        const fieldMap: Record<string, string> = {}
+        for (const [name, fid] of Object.entries(fullFieldMap)) {
+            if (visibleFieldIds.has(fid)) fieldMap[name] = fid
+        }
         result.items = convertIdToName(fieldMap, result.items) as any
 
         res.json(success(result, '记录列表获取成功'))
@@ -116,10 +122,31 @@ export class MirrorController {
         const record = await mirrorService.getRecord(mirrorId, recordId)
 
         const mirror = await mirrorService.getMirror(mirrorId)
-        const fieldMap = await getFieldNameMap(mirror.sourceTableId, tenantId)
+        const fullFieldMap = await getFieldNameMap(mirror.sourceTableId, tenantId)
+        const visibleFieldIds = new Set(mirror.visibleFields as string[])
+        const fieldMap: Record<string, string> = {}
+        for (const [name, fid] of Object.entries(fullFieldMap)) {
+            if (visibleFieldIds.has(fid)) fieldMap[name] = fid
+        }
         const data = convertIdToName(fieldMap, [record])
 
         res.json(success(data[0], '记录详情获取成功'))
+    })
+
+    /** 获取镜像可见字段列表（仅返回 visibleFields 中的字段元数据） */
+    getFields = asyncHandler(async (req: Request, res: Response) => {
+        const tenantId = requireTenantId(req)
+        const { mirrorId } = req.params
+        const mirror = await mirrorService.getMirror(mirrorId)
+        const visibleFieldIds = new Set(mirror.visibleFields as string[])
+
+        // 查询母表全部字段，只返回 visibleFields 中的
+        const allFields = await prisma.dynamicField.findMany({
+            where: { tableId: mirror.sourceTableId, tenantId, deletedAt: null },
+        })
+        const visibleFields = allFields.filter((f: any) => visibleFieldIds.has(f.fieldId))
+
+        res.json(success(visibleFields, '镜像字段列表获取成功'))
     })
 }
 

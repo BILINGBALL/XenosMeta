@@ -21,6 +21,11 @@ interface DynamicState {
   // Records
   records: DynamicRecord[]
   currentRecord: DynamicRecord | null
+  recordsTotal: number
+  recordsPage: number
+  recordsPageSize: number
+  recordsSortField: string | null
+  recordsSortOrder: 'asc' | 'desc'
   // References
   references: FieldReference[]
   currentReference: FieldReference | null
@@ -53,7 +58,7 @@ interface DynamicState {
   restoreField: (tableId: string, fieldId: string) => Promise<boolean>
 
   // Record actions
-  fetchRecords: (tableId: string, tenantId: string) => Promise<void>
+  fetchRecords: (tableId: string, tenantId: string, page?: number, pageSize?: number, sortField?: string | null, sortOrder?: 'asc' | 'desc') => Promise<void>
   fetchRecord: (tableId: string, recordId: string) => Promise<void>
   createRecord: (tableId: string, data: CreateRecordRequest) => Promise<boolean>
   updateRecord: (tableId: string, recordId: string, data: UpdateRecordRequest) => Promise<boolean>
@@ -74,7 +79,8 @@ interface DynamicState {
   createMirror: (tableId: string, data: CreateMirrorRequest) => Promise<boolean>
   updateMirror: (mirrorId: string, data: UpdateMirrorRequest) => Promise<boolean>
   deleteMirror: (mirrorId: string) => Promise<boolean>
-  fetchMirrorRecords: (mirrorId: string) => Promise<void>
+  fetchMirrorRecords: (mirrorId: string, page?: number, pageSize?: number) => Promise<void>
+  fetchMirrorFields: (mirrorId: string) => Promise<void>
 
   clearMessage: () => void
 }
@@ -86,6 +92,11 @@ export const useDynamicStore = create<DynamicState>((set) => ({
   currentField: null,
   records: [],
   currentRecord: null,
+  recordsTotal: 0,
+  recordsPage: 1,
+  recordsPageSize: 20,
+  recordsSortField: null,
+  recordsSortOrder: 'desc',
   references: [],
   currentReference: null,
   mirrors: [],
@@ -239,11 +250,29 @@ export const useDynamicStore = create<DynamicState>((set) => ({
 
   // ==================== Records ====================
 
-  fetchRecords: async (tableId, tenantId) => {
+  fetchRecords: async (tableId, tenantId, page?: number, pageSize?: number, sortField?: string | null, sortOrder?: 'asc' | 'desc') => {
+    const p = page ?? 1
+    const ps = pageSize ?? 20
+    const sf = sortField ?? null
+    const so = sortOrder ?? 'desc'
     set({ loading: true, error: null })
     try {
-      const res = await postAction<PaginatedData<DynamicRecord>>(`/dynamic/tables/${tableId}/records/list`, { tenantId })
-      set({ records: unwrapList(res.data), loading: false })
+      const params = new URLSearchParams({ page: String(p), pageSize: String(ps) })
+      if (sf) { params.set('sortField', sf); params.set('sortOrder', so) }
+      const res = await postAction<PaginatedData<DynamicRecord>>(
+        `/dynamic/tables/${tableId}/records/list?${params.toString()}`,
+        { tenantId },
+      )
+      const data = res.data as any
+      set({
+        records: unwrapList(data),
+        recordsTotal: data?.total ?? 0,
+        recordsPage: data?.page ?? p,
+        recordsPageSize: data?.pageSize ?? ps,
+        recordsSortField: sf,
+        recordsSortOrder: so,
+        loading: false,
+      })
     } catch (e) {
       set({ error: (e as Error).message, loading: false })
     }
@@ -440,11 +469,34 @@ export const useDynamicStore = create<DynamicState>((set) => ({
     }
   },
 
-  fetchMirrorRecords: async (mirrorId) => {
+  fetchMirrorRecords: async (mirrorId, page, pageSize) => {
+    const p = page ?? 1
+    const ps = pageSize ?? 20
     set({ loading: true, error: null })
     try {
-      const res = await postAction<any>(`/dynamic/mirrors/${mirrorId}/records/list`, {})
-      set({ records: unwrapList((res as any).data), loading: false })
+      const res = await postAction<any>(
+        `/dynamic/mirrors/${mirrorId}/records/list?page=${p}&pageSize=${ps}`,
+        {},
+      )
+      const data = (res as any).data
+      set({
+        records: unwrapList(data),
+        recordsTotal: data?.total ?? 0,
+        recordsPage: data?.page ?? p,
+        recordsPageSize: data?.pageSize ?? ps,
+        loading: false,
+      })
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false })
+    }
+  },
+
+  fetchMirrorFields: async (mirrorId) => {
+    set({ loading: true, error: null })
+    try {
+      const res: any = await fetchList(`/dynamic/mirrors/${mirrorId}/fields`)
+      const items = Array.isArray(res?.data?.items) ? res.data.items : Array.isArray(res?.data) ? res.data : []
+      set({ fields: items, loading: false })
     } catch (e) {
       set({ error: (e as Error).message, loading: false })
     }

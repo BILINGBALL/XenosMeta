@@ -206,15 +206,49 @@ class DynamicService {
         jsonFilter?: any,
         page: number = 1,
         pageSize: number = 20,
+        sortField?: string,
+        sortOrder: 'asc' | 'desc' = 'desc',
     ): Promise<PaginatedResult<any>> {
         const where = {
             ...(await buildDynamicWhere(tableId, tenantId as any, jsonFilter)),
             ...notDeleted,
         };
 
+        // Custom sort by JSONB field — use raw SQL for path-based ordering
+        if (sortField) {
+            const skip = (page - 1) * pageSize;
+            const sortDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
+            // PostgreSQL: data->>'key' extracts text; for numeric fields, try ::numeric cast
+            const sql = `
+                SELECT * FROM "dynamic_record"
+                WHERE "tableId" = $1 AND "tenantId" = $2 AND "deletedAt" IS NULL
+                ORDER BY
+                  CASE
+                    WHEN "data"->>$3 ~ '^[0-9]+(\\.[0-9]+)?$' THEN lpad("data"->>$3, 20, '0')
+                    ELSE "data"->>$3
+                  END ${sortDir} NULLS LAST,
+                  "createdAt" DESC
+                LIMIT $4 OFFSET $5
+            `;
+            const countSql = `SELECT COUNT(*)::int FROM "dynamic_record" WHERE "tableId" = $1 AND "tenantId" = $2 AND "deletedAt" IS NULL`;
+
+            const [items, countResult] = await Promise.all([
+                prisma.$queryRawUnsafe<any[]>(sql, tableId, tenantId, sortField, pageSize, skip),
+                prisma.$queryRawUnsafe<[{ count: number }]>(countSql, tableId, tenantId),
+            ]);
+
+            return {
+                items,
+                total: countResult[0]?.count ?? 0,
+                page,
+                pageSize,
+                totalPages: Math.ceil((countResult[0]?.count ?? 0) / pageSize),
+            };
+        }
+
         return paginate(prisma.dynamicRecord, {
             where,
-            orderBy: {createdAt: 'desc'},
+            orderBy: { createdAt: 'desc' },
         }, page, pageSize);
     }
 

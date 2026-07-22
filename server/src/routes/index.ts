@@ -8,6 +8,7 @@ import mirrorRoutes from "./mirror.routes"
 import roleRoutes from "./role.routes"
 import permissionRoutes from "./permission.routes"
 import developerRoutes from "./developer.routes"
+import fileRoutes from "@modules/file/file.routes"
 
 const router = express.Router()
 
@@ -20,5 +21,6 @@ router.use("/dynamic", mirrorRoutes)
 router.use('/role', roleRoutes)
 router.use('/permission', permissionRoutes)
 router.use('/developer', developerRoutes)
+router.use('/file', fileRoutes)
 
 export default router

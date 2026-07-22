@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import router from '@routes/index'
 import { errorHandler } from './middleware/error.middleware'
 import { logger } from '@common/logger'
+import { ensureBucket } from '@config/minio'
 import { cleanupExpiredDeleted } from '@common/cleanup'
 
 
@@ -46,8 +47,10 @@ function scheduleCleanup() {
     }, CLEANUP_INTERVAL_MS)
 }
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     logger.info(`Server started: http://localhost:${PORT}`)
+    // Initialize MinIO bucket
+    try { await ensureBucket(); logger.info('MinIO bucket ready') } catch (e) { logger.warn('MinIO not available — file upload disabled') }
     // 软删除自动清理（暂不激活）
     // logger.info({ retentionDays: CLEANUP_RETENTION_DAYS }, '软删除清理已启用')
     // scheduleCleanup()

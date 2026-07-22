@@ -6,7 +6,7 @@ import rateLimit from 'express-rate-limit'
  */
 export const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15分钟
-    max: 10,
+    max: 100,
     message: {
         code: 429,
         message: '登录尝试过于频繁，请15分钟后再试',
