@@ -35,6 +35,7 @@ export function UserPanel() {
   const [editEmail, setEditEmail] = useState('')
   const [editPhone, setEditPhone] = useState('')
   const [editAvatar, setEditAvatar] = useState('')
+  const [editTenantId, setEditTenantId] = useState('')
   const [editProfile, setEditProfile] = useState('{}')
   const [editStatus, setEditStatus] = useState('true')
 
@@ -98,6 +99,7 @@ export function UserPanel() {
       email: editEmail || undefined,
       phone: editPhone || undefined,
       avatar: editAvatar || undefined,
+      tenantId: editTenantId || undefined,
       profile: profile || undefined,
       status: editStatus === 'true',
     })
@@ -110,6 +112,7 @@ export function UserPanel() {
     setEditEmail(u.email || '')
     setEditPhone(u.phone || '')
     setEditAvatar(u.avatar || '')
+    setEditTenantId(u.tenantId || '')
     setEditProfile(u.profile ? JSON.stringify(u.profile, null, 2) : '{}')
     setEditStatus(u.status ? 'true' : 'false')
   }
@@ -280,6 +283,7 @@ export function UserPanel() {
             <FormField label="邮箱" id="eu-email" value={editEmail} onChange={setEditEmail} />
             <FormField label="手机号" id="eu-phone" value={editPhone} onChange={setEditPhone} />
             <FormField label="头像 URL" id="eu-avatar" value={editAvatar} onChange={setEditAvatar} />
+            <FormField label="租户 ID" id="eu-tid" value={editTenantId} onChange={setEditTenantId} placeholder="修改用户所属租户" />
             <div className="grid gap-1.5">
               <Label>Profile (JSON)</Label>
               <Textarea id="eu-profile" value={editProfile} onChange={(e) => setEditProfile(e.target.value)} rows={4} className="font-mono text-xs" />

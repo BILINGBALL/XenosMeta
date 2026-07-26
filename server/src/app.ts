@@ -47,10 +47,13 @@ function scheduleCleanup() {
     }, CLEANUP_INTERVAL_MS)
 }
 
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
     logger.info(`Server started: http://localhost:${PORT}`)
-    // Initialize MinIO bucket
-    try { await ensureBucket(); logger.info('MinIO bucket ready') } catch (e) { logger.warn('MinIO not available — file upload disabled') }
+    // Initialize MinIO bucket (non-blocking with timeout)
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+    Promise.race([ensureBucket(), timeout])
+      .then(() => logger.info('MinIO bucket ready'))
+      .catch(() => logger.warn('MinIO not available — file upload disabled'))
     // 软删除自动清理（暂不激活）
     // logger.info({ retentionDays: CLEANUP_RETENTION_DAYS }, '软删除清理已启用')
     // scheduleCleanup()

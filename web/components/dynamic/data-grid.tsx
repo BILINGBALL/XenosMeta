@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useDynamicStore } from '@/stores/dynamic-store'
+import { useFileStore } from '@/stores/file-store'
+import type { FileItem } from '@/stores/file-store'
+import { FilePreview } from '@/components/file/file-preview'
+import { displayFileName } from '@/lib/file-utils'
 import type { DynamicField, DynamicRecord, FieldReference, DynamicTable } from '@/types'
 import { postAction } from '@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
 import { unwrapList } from '@/types'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,7 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, ArrowUpDown, Share2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, ArrowUpDown, Share2, Paperclip } from 'lucide-react'
 
 // ===== Helpers =====
 
@@ -72,7 +77,6 @@ function useReferenceLabels(
 
     async function resolve() {
       setLoadingRefs(true)
-      // Collect all unique (refId, recordId) pairs
       const toResolve = new Map<string, { fieldName: string; ref: FieldReference; recordId: string }>()
       for (const record of records) {
         if (!record.data) continue
@@ -131,44 +135,229 @@ function ReferenceDetailDialog({
   record,
   ref,
   fieldName,
+  sourceFields,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   record: any | null
   ref: FieldReference | null
   fieldName: string
+  sourceFields: DynamicField[]
 }) {
+  // Build field lookup map — hooks must come first
+  const sourceFieldMap = useMemo(() => {
+    const m = new Map<string, DynamicField>()
+    for (const f of sourceFields) m.set(f.name, f)
+    return m
+  }, [sourceFields])
+
+  const [nestedLabelMap, setNestedLabelMap] = useState<Record<string, string>>({})
+
+  // early-safe values
+  const effectiveRecord = record || { data: {}, recordId: '', _sourceTableId: '' }
+  const effectiveRef = ref || { sourceFields: [], sourceTableId: '' } as any
+  const data = effectiveRecord.data || {}
+  const srcFields = (effectiveRef.sourceFields as string[]) || []
+  const allKeys = Object.keys(data)
+  const displayKeys = allKeys.length > 0 ? allKeys : srcFields
+
+  // Resolve nested reference labels (one level only)
+  useEffect(() => {
+    if (!open || !record?._sourceTableId) return
+
+    // Find all reference-type fields among the displayed data
+    const nestedRefs: { key: string; recordId: string; fieldId: string }[] = []
+    for (const key of displayKeys) {
+      const sf = sourceFieldMap.get(key)
+      if (!sf || sf.type !== 'reference') continue
+      const val = coerceValue(data[key])
+      if (!val) continue
+      nestedRefs.push({ key, recordId: val, fieldId: sf.fieldId })
+    }
+    if (nestedRefs.length === 0) return
+
+    let cancelled = false
+
+    async function resolveNested() {
+      const map: Record<string, string> = {}
+      try {
+        // Fetch refs config for the source table
+        const refsRes: any = await apiClient.get(`/dynamic/tables/${record!._sourceTableId}/references`)
+        const refsList = (refsRes as any)?.data?.items || (refsRes as any)?.data || refsRes || []
+        const refByFieldId = new Map<string, FieldReference>()
+        for (const r of refsList) refByFieldId.set(r.fieldId, r)
+
+        const tasks: Promise<void>[] = []
+        for (const nr of nestedRefs) {
+          const fieldRef = refByFieldId.get(nr.fieldId)
+          if (!fieldRef) continue
+          tasks.push(
+            postAction(`/dynamic/tables/${fieldRef.sourceTableId}/references/${fieldRef.refId}/lookup`, { recordId: nr.recordId, page: 1, pageSize: 1 })
+              .then((res: any) => {
+                const items = res?.data?.items || res?.data || []
+                const match = items.find((r: any) => r.recordId === nr.recordId)
+                let label = ''
+                if (match) {
+                  if (fieldRef.displayField && match.data?.[fieldRef.displayField]) {
+                    label = String(match.data[fieldRef.displayField])
+                  } else if (fieldRef.sourceFields?.length) {
+                    label = (fieldRef.sourceFields as string[]).map((f: string) => {
+                      const v = match.data?.[f]
+                      return v != null ? String(v) : ''
+                    }).filter(Boolean).join(' - ')
+                  }
+                }
+                map[nr.key] = label || nr.recordId
+              })
+              .catch(() => { map[nr.key] = nr.recordId }),
+          )
+        }
+        // batch up to 10 parallel
+        for (let i = 0; i < tasks.length; i += 10) {
+          await Promise.all(tasks.slice(i, i + 10))
+        }
+      } catch { /* ignore */ }
+      if (!cancelled) setNestedLabelMap(prev => ({ ...prev, ...map }))
+    }
+
+    resolveNested()
+    return () => { cancelled = true }
+  }, [open, data, displayKeys, sourceFieldMap, record])
+
   if (!record || !ref) return null
-  const data = record.data || {}
-  const srcFields = (ref.sourceFields as string[]) || []
-  const allFields = Object.keys(data)
+
+  const renderFieldValue = (key: string, val: unknown) => {
+    if (val == null) return <span className="text-sm break-all">—</span>
+
+    const sf = sourceFieldMap.get(key)
+
+    // Nested reference field
+    if (sf?.type === 'reference') {
+      const recordId = coerceValue(val)
+      const label = nestedLabelMap[key] || recordId
+      return (
+        <span className="text-sm break-all">
+          {label}
+          <Badge variant="outline" className="text-[9px] h-3.5 px-1 ml-1 align-middle">引</Badge>
+        </span>
+      )
+    }
+
+    // Attachment field: resolve file info and show clickable preview
+    if (sf?.type === 'attachment') {
+      const fileId = coerceValue(val)
+      return <AttachmentRefCell fileId={fileId} />
+    }
+
+    // Default: plain text
+    return <span className="text-sm break-all">{coerceValue(val)}</span>
+  }
+
+  const isSrcField = (key: string) => srcFields.includes(key)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span>{fieldName} 详情</span>
-            <Badge variant="outline" className="text-xs font-mono">{record.recordId}</Badge>
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2 max-h-96 overflow-auto">
-          {(allFields.length > 0 ? allFields : srcFields).map((key) => {
-            const val = data[key]
-            const isSrcField = srcFields.includes(key)
-            return (
-              <div key={key} className="flex items-start gap-3 py-1.5 border-b border-muted last:border-0">
-                <span className={`text-xs shrink-0 w-24 font-medium ${isSrcField ? 'text-foreground' : 'text-muted-foreground'}`}>
-                  {key}
-                  {isSrcField && <span className="ml-1 text-primary">*</span>}
-                </span>
-                <span className="text-sm break-all">{val != null ? String(val) : '—'}</span>
-              </div>
-            )
-          })}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span>{fieldName} 详情</span>
+              <Badge variant="outline" className="text-xs font-mono">{record.recordId}</Badge>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-auto flex-1">
+            {displayKeys.map((key) => {
+              const val = data[key]
+              const isSf = isSrcField(key)
+              return (
+                <div key={key} className="flex items-start gap-3 py-1.5 border-b border-muted last:border-0">
+                  <span className={`text-xs shrink-0 w-24 font-medium ${isSf ? 'text-foreground' : 'text-muted-foreground'}`}>
+                    {key}
+                    {isSf && <span className="ml-1 text-primary">*</span>}
+                  </span>
+                  <div className="min-w-0 flex-1">{renderFieldValue(key, val)}</div>
+                </div>
+              )
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+// ===== Attachment Cell (resolves fileId to show filename + click to preview) =====
+
+function AttachmentRefCell({ fileId }: { fileId: string }) {
+  const fileStore = useFileStore()
+  const [filename, setFilename] = useState(fileId)
+  const [resolvedFile, setResolvedFile] = useState<any | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    async function resolve() {
+      let found = false
+      // Try store first
+      const cached = useFileStore.getState().files.find(fc => fc.fileId === fileId)
+      if (cached) {
+        if (!cancelled) {
+          setFilename(displayFileName(cached))
+          setResolvedFile(cached)
+        }
+        found = true
+      }
+      if (!found) {
+        try {
+          const res: any = await apiClient.get(`/file/${fileId}`)
+          const fileData = ((res as any)?.data) || res
+          if (!cancelled && fileData) {
+            const resolved: FileItem = {
+              id: fileData.id || '',
+              fileId: fileData.fileId || fileId,
+              tenantId: fileData.tenantId || '',
+              bucket: fileData.bucket || '',
+              objectKey: fileData.objectKey || '',
+              filename: fileData.filename || fileId,
+              mimeType: fileData.mimeType || '',
+              size: fileData.size || 0,
+              currentVersion: fileData.currentVersion || 1,
+              tags: fileData.tags || [],
+              description: fileData.description || null,
+              uploadedBy: fileData.uploadedBy || null,
+              createdAt: fileData.createdAt || '',
+              updatedAt: fileData.updatedAt || '',
+            }
+            setFilename(resolved.filename)
+            setResolvedFile(resolved)
+          }
+        } catch { /* keep fileId fallback */ }
+      }
+    }
+    resolve()
+    return () => { cancelled = true }
+  }, [fileId])
+
+  const handleClick = () => {
+    if (resolvedFile) {
+      setPreviewOpen(true)
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={handleClick}
+        className="inline-flex items-center gap-1.5 text-primary hover:underline text-sm font-medium cursor-pointer"
+        disabled={!resolvedFile}
+      >
+        <Paperclip className="size-3.5" />
+        <span className="truncate max-w-48">{filename}</span>
+      </button>
+      {previewOpen && resolvedFile && (
+        <FilePreview file={resolvedFile} onClose={() => setPreviewOpen(false)} />
+      )}
+    </>
   )
 }
 
@@ -203,6 +392,7 @@ export function DataGrid({ table, mirrorId }: DataGridProps) {
   const [detailRecord, setDetailRecord] = useState<any | null>(null)
   const [detailRef, setDetailRef] = useState<FieldReference | null>(null)
   const [detailFieldName, setDetailFieldName] = useState('')
+  const [detailSourceFields, setDetailSourceFields] = useState<DynamicField[]>([])
 
   // Load data on mount / table / mirror change
   useEffect(() => {
@@ -244,21 +434,25 @@ export function DataGrid({ table, mirrorId }: DataGridProps) {
     }
   }, [table.tableId, table.tenantId, recordsPageSize, recordsSortField, recordsSortOrder, mirrorId, store])
 
-  // Detail lookup for a reference cell
+  // Detail lookup for a reference cell — now also fetches source table fields
   const openRefDetail = useCallback(async (fieldName: string, recordId: string) => {
     const ref = refMap.get(fieldName)
     if (!ref) return
     try {
-      const res: any = await postAction(
-        `/dynamic/tables/${ref.sourceTableId}/references/${ref.refId}/lookup`,
-        { recordId, page: 1, pageSize: 1 },
-      )
-      const items = res?.data?.items || res?.data || []
+      const [recordRes, fieldsRes] = await Promise.all([
+        postAction(`/dynamic/tables/${ref.sourceTableId}/references/${ref.refId}/lookup`, { recordId, page: 1, pageSize: 1 }) as any,
+        apiClient.get(`/dynamic/tables/${ref.sourceTableId}/fields`) as any,
+      ])
+      const items = recordRes?.data?.items || recordRes?.data || []
       const match = items.find((r: any) => r.recordId === recordId)
       if (match) {
+        const sourceFields: DynamicField[] = fieldsRes?.data?.items
+          ? unwrapList(fieldsRes.data)
+          : (Array.isArray(fieldsRes?.data) ? fieldsRes.data : (Array.isArray(fieldsRes) ? fieldsRes : []))
         setDetailRecord({ ...match, _sourceTableId: ref.sourceTableId })
         setDetailRef(ref)
         setDetailFieldName(fieldName)
+        setDetailSourceFields(sourceFields)
         setDetailOpen(true)
       }
     } catch { /* ignore */ }
@@ -396,6 +590,20 @@ export function DataGrid({ table, mirrorId }: DataGridProps) {
                             )
                           }
 
+                          // Attachment fields: show clickable preview button
+                          if (col.type === 'attachment') {
+                            const fileId = coerceValue(rawValue)
+                            return (
+                              <TableCell key={col.fieldId} className="max-w-48">
+                                {fileId ? (
+                                  <AttachmentRefCell fileId={fileId} />
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">—</span>
+                                )}
+                              </TableCell>
+                            )
+                          }
+
                           return (
                             <TableCell key={col.fieldId} className="max-w-64 text-xs">
                               <span className="line-clamp-2" title={coerceValue(rawValue)}>
@@ -471,6 +679,7 @@ export function DataGrid({ table, mirrorId }: DataGridProps) {
         record={detailRecord}
         ref={detailRef}
         fieldName={detailFieldName}
+        sourceFields={detailSourceFields}
       />
     </Card>
   )

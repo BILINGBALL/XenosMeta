@@ -8,6 +8,7 @@ import {RolePanel} from '@/components/role/role-panel'
 import {PermissionPanel} from '@/components/permission/permission-panel'
 import {TablePanel} from '@/components/dynamic/table-panel'
 import {SystemPanel} from '@/components/system/system-panel'
+import {FilePanel} from '@/components/file/file-panel'
 import {useAuthStore} from '@/stores/auth-store'
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs'
 import {Badge} from '@/components/ui/badge'
@@ -70,6 +71,10 @@ export default function Home() {
                                      className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-md px-3 py-1.5 text-sm">
                             ⚙️ 系统
                         </TabsTrigger>
+                        <TabsTrigger value="file"
+                                     className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-md px-3 py-1.5 text-sm">
+                            📁 文件/回收站
+                        </TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="auth"><AuthPanel/></TabsContent>
@@ -80,6 +85,7 @@ export default function Home() {
                     <TabsContent value="permission"><PermissionPanel/></TabsContent>
                     <TabsContent value="dynamic"><TablePanel/></TabsContent>
                     <TabsContent value="system"><SystemPanel/></TabsContent>
+                    <TabsContent value="file"><FilePanel/></TabsContent>
                 </Tabs>
             </main>
 

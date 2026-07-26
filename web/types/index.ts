@@ -78,6 +78,7 @@ export interface UpdateUserRequest {
   phone?: string
   profile?: Record<string, unknown>
   status?: boolean
+  tenantId?: string
 }
 
 export interface AssignGroupRequest {

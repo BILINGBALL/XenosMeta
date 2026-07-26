@@ -367,24 +367,50 @@ model AuditLog {
 // 8. 文件管理
 // ------------------------------------
 model File {
-  id          String    @id @default(uuid())
-  fileId      String    @unique
-  tenantId    String
-  groupId     String?
-  bucket      String
-  objectKey   String
-  filename    String
-  mimeType    String
-  size        Int
-  tags        Json?     @db.JsonB
-  description String?   @db.Text
-  uploadedBy  String?
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id             String        @id @default(uuid())
+  fileId         String        @unique
+  tenantId       String
+  groupId        String?
+  bucket         String
+  objectKey      String
+  filename       String
+  displayName    String?       // 用户自定义显示名称（重命名后设置）
+  mimeType       String
+  size           Int
+  currentVersion Int           @default(1)
+  tags           Json?         @db.JsonB
+  description    String?       @db.Text
+  sha256         String?       // SHA256 文件内容哈希（去重用）
+  uploadedBy     String?
+  deletedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  versions FileVersion[]
 
   @@index([tenantId])
   @@index([groupId])
   @@index([fileId])
+  @@index([tenantId, sha256])
   @@map("file")
+}
+
+// 9. 文件版本
+model FileVersion {
+  id         String   @id @default(uuid())
+  versionId  String   @unique // fv_xxxx
+  fileId     String                  // FK to File.fileId
+  version    Int                     // 1, 2, 3...
+  objectKey  String                  // MinIO/OSS object key for this version
+  filename   String                  // original filename at upload time
+  mimeType   String
+  size       Int
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+
+  file File @relation(fields: [fileId], references: [fileId], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([fileId, version])
+  @@map("file_version")
 }

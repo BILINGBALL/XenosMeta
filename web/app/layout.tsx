@@ -21,6 +21,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <head>
+        {/* Highlight.js: atom-one-dark theme for code preview */}
+        <link
+          rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/atom-one-dark.min.css"
+        />
+      </head>
       <body className="min-h-screen bg-background text-foreground font-sans">
         {children}
         <Toaster richColors position="top-right" />

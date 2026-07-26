@@ -22,7 +22,11 @@ declare global {
 
 export const authMiddleware = async (req: Request, res: Response, next: NextFunction) => {
 
-    const token = req.headers.authorization?.replace('Bearer ', '')
+    let token = req.headers.authorization?.replace('Bearer ', '')
+    // Support token via query param for <img src> / <video src> etc. that can't set Authorization header
+    if (!token && req.query._token) {
+        token = req.query._token as string
+    }
     if (!token) {
         return res.status(401).json(unauthorized('未登录，请先授权'))
     }
