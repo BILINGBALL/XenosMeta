@@ -9,6 +9,7 @@ import roleRoutes from "./role.routes"
 import permissionRoutes from "./permission.routes"
 import developerRoutes from "./developer.routes"
 import fileRoutes from "@modules/file/file.routes"
+import agentRoutes from "@modules/agent/agent.routes"
 
 const router = express.Router()
 
@@ -22,5 +23,6 @@ router.use('/role', roleRoutes)
 router.use('/permission', permissionRoutes)
 router.use('/developer', developerRoutes)
 router.use('/file', fileRoutes)
+router.use('/agent', agentRoutes)
 
 export default router

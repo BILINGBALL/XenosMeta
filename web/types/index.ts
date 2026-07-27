@@ -386,3 +386,75 @@ export interface InitSuperAdminRequest {
   userId: string
   tenantId: string
 }
+
+// ==================== Agent ====================
+
+/** Agent 会话 */
+export interface AgentConversation {
+  id: string
+  title: string
+  userId: string
+  tenantId: string
+  status: 'active' | 'archived'
+  callCount: number
+  tokenUsage: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** Agent 消息角色 */
+export type AgentMessageRole = 'user' | 'assistant' | 'system' | 'tool'
+
+/** Agent 消息 */
+export interface AgentMessage {
+  id: string
+  conversationId: string
+  role: AgentMessageRole
+  content: string
+  toolCalls?: unknown
+  toolCallId?: string
+  toolName?: string
+  tokenCount: number
+  createdAt: string
+}
+
+/** Agent 工具信息 */
+export interface AgentTool {
+  name: string
+  description: string
+  available: boolean
+}
+
+/** SSE 事件类型 */
+export type AgentSSEEvent = 'thinking' | 'text' | 'tool_start' | 'tool_result' | 'error' | 'done' | 'usage'
+
+/** SSE 事件数据 */
+export interface AgentSSEEventData {
+  thinking: { content: string }
+  text: { content: string; delta: string }
+  tool_start: { toolCallId: string; name: string; arguments: Record<string, unknown> }
+  tool_result: { toolCallId: string; success: boolean; result: unknown; error?: string }
+  error: { message: string; code?: string }
+  done: { conversationId: string }
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number }
+}
+
+/** 前端展示用的消息（含工具调用过程） */
+export interface ChatDisplayMessage {
+  id: string
+  role: AgentMessageRole
+  content: string
+  toolEvents?: ToolEvent[]
+  timestamp: number
+}
+
+/** 工具调用事件（用于前端展示过程） */
+export interface ToolEvent {
+  toolCallId: string
+  name: string
+  arguments: Record<string, unknown>
+  result?: unknown
+  error?: string
+  success?: boolean
+  status: 'running' | 'done' | 'error'
+}

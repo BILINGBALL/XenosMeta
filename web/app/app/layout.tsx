@@ -2,7 +2,7 @@
 
 import { useAuthStore } from '@/stores/auth-store'
 import Link from 'next/link'
-import { Layers } from 'lucide-react'
+import { Layers, Bot } from 'lucide-react'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
@@ -24,6 +24,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </Link>
               <Link href="/app/files" className="px-3 py-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
                 文件管理
+              </Link>
+              <Link href="/agent" className="flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+                <Bot className="size-3.5" />AI Agent
               </Link>
             </nav>
           </div>
