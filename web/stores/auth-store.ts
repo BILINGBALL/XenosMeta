@@ -22,6 +22,7 @@ interface AuthState {
   refreshToken: string | null
   user: Omit<LoginResponse, 'accessToken' | 'refreshToken' | 'expiresIn'> | null
   isLoggedIn: boolean
+  hasHydrated: boolean
   loading: boolean
   error: string | null
   message: string | null
@@ -40,6 +41,7 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       user: null,
       isLoggedIn: false,
+      hasHydrated: false,
       loading: false,
       error: null,
       message: null,
@@ -101,6 +103,11 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         isLoggedIn: state.isLoggedIn,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.hasHydrated = true
+        }
+      },
     }
   )
 )

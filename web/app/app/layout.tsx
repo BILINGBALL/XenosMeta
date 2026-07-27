@@ -6,6 +6,7 @@ import { Layers, Bot } from 'lucide-react'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
 
   return (
     <div className="min-h-screen flex flex-col bg-muted/30">
@@ -31,7 +32,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            {!isLoggedIn && <a href="/index.html" className="hover:text-foreground transition-colors">未登录</a>}
+            {hasHydrated && !isLoggedIn && <a href="/index.html" className="hover:text-foreground transition-colors">未登录</a>}
           </div>
         </div>
       </header>

@@ -15,6 +15,7 @@ const DEFAULT_TABLE_ID = 'tblYM9eBk8UqpKS'
 
 export default function AppPage() {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const store = useDynamicStore()
   const { tables, loading, outgoingMirrors, incomingMirrors, mirrors } = store
   const { groups } = useGroupStore()
@@ -25,12 +26,12 @@ export default function AppPage() {
   const [selectorKey, setSelectorKey] = useState(DEFAULT_TABLE_ID)
 
   useEffect(() => {
-    if (isLoggedIn) {
+    if (hasHydrated && isLoggedIn) {
       store.fetchTables()
       store.fetchAllMirrors()
       store.fetchCategorizedMirrors()
     }
-  }, [isLoggedIn])
+  }, [hasHydrated, isLoggedIn])
 
   // Group name map
   const groupNameMap = useMemo(() => {
@@ -81,6 +82,16 @@ export default function AppPage() {
   }
 
   const currentTitle = selection.type === 'mirror' ? selection.name : (selectedTable?.name || '')
+
+  if (!hasHydrated) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 text-muted-foreground">
+        <Database className="size-16 mb-4 opacity-20 animate-pulse" />
+        <p className="text-lg font-medium mb-2">加载中...</p>
+        <p className="text-sm">正在验证登录状态</p>
+      </div>
+    )
+  }
 
   if (!isLoggedIn) {
     return (
