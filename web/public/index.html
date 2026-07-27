@@ -77,9 +77,12 @@
   <nav class="nav">
     <div class="nav-inner">
       <span class="nav-logo">Auth Core</span>
-      <div class="nav-btns">
+      <div class="nav-btns" id="nav-btns-auth">
         <button class="btn btn-ghost btn-sm" id="nav-login">登录</button>
         <button class="btn btn-primary btn-sm" id="nav-register">免费注册</button>
+      </div>
+      <div class="nav-btns" id="nav-btns-logged-in" style="display:none">
+        <button class="btn btn-primary btn-sm" id="nav-enter-app">进入系统</button>
       </div>
     </div>
   </nav>
@@ -88,9 +91,12 @@
     <div style="max-width:720px">
       <h1>企业级多租户<span>权限管理平台</span></h1>
       <p>为 SaaS 应用提供开箱即用的认证、授权、组织架构与动态数据表能力。轻量、安全、可扩展。</p>
-      <div class="hero-btns">
+      <div class="hero-btns" id="hero-btns-auth">
         <button class="btn btn-primary btn-lg" id="hero-register">免费注册 <span style="margin-left:8px">→</span></button>
         <button class="btn btn-outline btn-lg" id="hero-login">登录</button>
+      </div>
+      <div class="hero-btns" id="hero-btns-logged-in" style="display:none">
+        <button class="btn btn-primary btn-lg" id="hero-enter-app">进入系统 <span style="margin-left:8px">→</span></button>
       </div>
     </div>
   </section>
@@ -185,8 +191,46 @@
   function closeRegister() { hide('reg-modal'); }
   function switchToLogin() { closeRegister(); openLogin(); }
 
+  // Check if already logged in from localStorage
+  function checkAuth() {
+    try {
+      var raw = localStorage.getItem('auth-core-auth');
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed.state && parsed.state.isLoggedIn) return true;
+      }
+    } catch(e) {}
+    return false;
+  }
+
+  function showLoggedInUI() {
+    $('nav-btns-auth').style.display = 'none';
+    $('nav-btns-logged-in').style.display = 'flex';
+    $('hero-btns-auth').style.display = 'none';
+    $('hero-btns-logged-in').style.display = 'flex';
+  }
+
+  function showLoggedOutUI() {
+    $('nav-btns-auth').style.display = 'flex';
+    $('nav-btns-logged-in').style.display = 'none';
+    $('hero-btns-auth').style.display = 'flex';
+    $('hero-btns-logged-in').style.display = 'none';
+  }
+
+  function enterApp() {
+    window.location.href = '/app';
+  }
+
+  // Init auth state on page load
+  if (checkAuth()) {
+    showLoggedInUI();
+  } else {
+    showLoggedOutUI();
+  }
+
   ['nav-login','hero-login'].forEach(function(id) { $(id).addEventListener('click', openLogin); });
   ['nav-register','hero-register'].forEach(function(id) { $(id).addEventListener('click', openRegister); });
+  ['nav-enter-app','hero-enter-app'].forEach(function(id) { $(id).addEventListener('click', enterApp); });
   $('login-backdrop').addEventListener('click', closeLogin);
   $('login-close').addEventListener('click', closeLogin);
   $('reg-backdrop').addEventListener('click', closeRegister);
@@ -208,6 +252,7 @@
         localStorage.setItem('auth-core-auth', JSON.stringify({
           state: { accessToken: u.accessToken, refreshToken: u.refreshToken, user: { id: u.id, username: u.username, nickname: u.nickname, avatar: u.avatar, email: u.email, phone: u.phone }, isLoggedIn: true }, version: 0
         }));
+        showLoggedInUI();
         window.location.href = '/app';
       } else { alert('登录失败: ' + (d.message || '未知错误')); }
     }).catch(function(e) { alert('请求失败: ' + e.message); })

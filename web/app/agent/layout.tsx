@@ -25,7 +25,7 @@ export default function AgentLayout({ children }: { children: React.ReactNode })
               <span className="hidden sm:inline">数据表格</span>
             </Link>
             <span className="text-xs text-muted-foreground">
-              {isLoggedIn ? '已连接' : '未登录'}
+              {isLoggedIn ? '已连接' : <a href="/index.html" className="hover:text-foreground transition-colors">未登录</a>}
             </span>
           </div>
         </div>

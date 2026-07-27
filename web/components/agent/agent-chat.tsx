@@ -173,7 +173,7 @@ export function AgentChat() {
         <Bot className="size-16 mb-4 opacity-20" />
         <p className="text-lg font-medium mb-2">请先登录</p>
         <p className="text-sm mb-4">使用 AI Agent 需要先登录系统</p>
-        <Button onClick={() => window.open('/dashboard', '_self')}>前往登录</Button>
+        <Button onClick={() => window.open('/index.html', '_self')}>前往登录</Button>
       </div>
     )
   }

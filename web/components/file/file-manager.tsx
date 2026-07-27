@@ -19,7 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Upload, Search, X, Download, Trash2, Edit3, RefreshCw, History,
   ChevronDown, Grid3X3, List, Plus, ArrowUpDown, CheckSquare, Square,
-  RotateCcw, FileText, ClipboardCopy, Share2,
+  RotateCcw, FileText, ClipboardCopy, Share2, LogIn,
 } from 'lucide-react'
 
 // ===== File Manager =====
@@ -246,7 +246,20 @@ export function FileManager() {
     store.fetchFiles(1, sortBy, sortOrder)
   }
 
-  if (!isLoggedIn) return null
+  if (!isLoggedIn) {
+    return (
+      <Card className="shadow-sm">
+        <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+          <Upload className="size-12 mb-4 opacity-20" />
+          <p className="text-sm font-medium mb-1">请先登录</p>
+          <p className="text-xs mb-4">访问文件管理需要先登录系统</p>
+          <Button onClick={() => window.open('/index.html', '_self')} size="sm">
+            <LogIn className="size-3.5 mr-1" />前往登录
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
 
   const sortOptions: { key: typeof sortBy; label: string }[] = [
     { key: 'createdAt', label: '时间' },

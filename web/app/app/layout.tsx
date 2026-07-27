@@ -31,7 +31,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            {!isLoggedIn && <span>未登录</span>}
+            {!isLoggedIn && <a href="/index.html" className="hover:text-foreground transition-colors">未登录</a>}
           </div>
         </div>
       </header>

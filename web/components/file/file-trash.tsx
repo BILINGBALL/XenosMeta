@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import {
-  Search, X, Trash2, RefreshCw, RotateCcw, AlertTriangle,
+  Search, X, Trash2, RefreshCw, RotateCcw, AlertTriangle, LogIn,
 } from 'lucide-react'
 import { formatSize, FileTypeIcon, displayFileName } from '@/lib/file-utils'
 import { Pagination } from '@/components/shared/pagination'
@@ -84,7 +84,20 @@ export function FileTrash() {
     setConfirmAction(null)
   }
 
-  if (!isLoggedIn) return null
+  if (!isLoggedIn) {
+    return (
+      <Card className="shadow-sm">
+        <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+          <Trash2 className="size-12 mb-4 opacity-20" />
+          <p className="text-sm font-medium mb-1">请先登录</p>
+          <p className="text-xs mb-4">访问回收站需要先登录系统</p>
+          <Button onClick={() => window.open('/index.html', '_self')} size="sm">
+            <LogIn className="size-3.5 mr-1" />前往登录
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card className="shadow-sm">
