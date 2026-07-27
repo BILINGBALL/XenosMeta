@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.23:3001/api'
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,

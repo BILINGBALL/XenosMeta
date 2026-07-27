@@ -77,7 +77,7 @@ interface FileState {
   emptyTrash: () => Promise<boolean>
 }
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.23:3001/api'
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'
 
 export const useFileStore = create<FileState>((set, get) => ({
   files: [],
@@ -203,13 +203,13 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   getContentUrl: (fileId: string): string => {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.23:3001/api'
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'
     return `${apiBase}/file/${fileId}/content`
   },
 
   /** Get content URL with auth token injected as query param — for <img>/<video> tags */
   getThumbnailUrl: (fileId: string, width: number = 200): string => {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.23:3001/api'
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'
     return `${apiBase}/file/${fileId}/thumbnail?w=${width}`
   },
 
