@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X } from 'lucide-react'
+import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu } from 'lucide-react'
 import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
 import type { ChatDisplayMessage, ToolEvent } from '@/types'
 
@@ -26,13 +26,9 @@ function MessageBubble({ msg, streaming }: { msg: ChatDisplayMessage; streaming:
 
       {/* 消息内容 */}
       <div className={`flex-1 min-w-0 ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-2`}>
-        {/* 工具调用过程 */}
+        {/* 工具调用概览 — 收起时只显示一行精简信息 */}
         {msg.toolEvents && msg.toolEvents.length > 0 && (
-          <div className="w-full space-y-1.5">
-            {msg.toolEvents.map(te => (
-              <ToolEventCard key={te.toolCallId} event={te} />
-            ))}
-          </div>
+          <ToolEventBanner events={msg.toolEvents} />
         )}
 
         {/* 文本内容 */}
@@ -55,54 +51,41 @@ function MessageBubble({ msg, streaming }: { msg: ChatDisplayMessage; streaming:
   )
 }
 
-// ==================== 工具调用卡片 ====================
+// ==================== 工具调用精简概览 ====================
 
-function ToolEventCard({ event }: { event: ToolEvent }) {
-  const [expanded, setExpanded] = useState(false)
+function ToolEventBanner({ events }: { events: ToolEvent[] }) {
+  const [open, setOpen] = useState(false)
+
+  if (events.length === 0) return null
 
   return (
-    <div className="rounded-lg border bg-card text-card-foreground overflow-hidden text-xs">
-      {/* 头部 */}
+    <div className="text-xs">
       <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
       >
-        {expanded ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
-        <Wrench className="size-3 shrink-0 text-muted-foreground" />
-        <span className="font-medium">{event.name}</span>
-        {event.status === 'running' && <Loader2 className="size-3 animate-spin text-blue-500" />}
-        {event.status === 'done' && <Badge variant="default" className="text-[10px] h-4 px-1">成功</Badge>}
-        {event.status === 'error' && <Badge variant="destructive" className="text-[10px] h-4 px-1">失败</Badge>}
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <Wrench className="size-3" />
+        <span>
+          调用了 {events.length} 个工具
+          {events.filter(e => e.status === 'running').length > 0 && (
+            <Loader2 className="size-2.5 inline ml-1 animate-spin align-baseline" />
+          )}
+        </span>
       </button>
 
-      {/* 展开内容 */}
-      {expanded && (
-        <div className="border-t px-3 py-2 space-y-2 bg-muted/30">
-          {/* 参数 */}
-          <div>
-            <span className="text-muted-foreground">参数：</span>
-            <pre className="mt-1 p-2 bg-muted rounded text-[11px] overflow-auto max-h-40 font-mono">
-              {JSON.stringify(event.arguments, null, 2)}
-            </pre>
-          </div>
-          {/* 结果 */}
-          {event.result !== undefined && (
-            <div>
-              <span className="text-muted-foreground">结果：</span>
-              <pre className="mt-1 p-2 bg-muted rounded text-[11px] overflow-auto max-h-40 font-mono">
-                {typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)}
-              </pre>
+      {open && (
+        <div className="mt-2 space-y-1.5">
+          {events.map(ev => (
+            <div key={ev.toolCallId} className="rounded border bg-card px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium">{ev.name}</span>
+                {ev.status === 'running' && <Loader2 className="size-2.5 animate-spin text-blue-500" />}
+                {ev.status === 'done' && <Badge variant="default" className="text-[9px] h-3.5 px-1 leading-none">✓</Badge>}
+                {ev.status === 'error' && <Badge variant="destructive" className="text-[9px] h-3.5 px-1 leading-none">✗</Badge>}
+              </div>
             </div>
-          )}
-          {/* 错误 */}
-          {event.error && (
-            <div>
-              <span className="text-destructive">错误：</span>
-              <pre className="mt-1 p-2 bg-destructive/10 rounded text-[11px] text-destructive">
-                {event.error}
-              </pre>
-            </div>
-          )}
+          ))}
         </div>
       )}
     </div>
@@ -115,6 +98,7 @@ export function AgentChat() {
   const store = useAgentStore()
   const { isLoggedIn } = useAuthStore()
   const [input, setInput] = useState('')
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // 语音识别
@@ -177,6 +161,12 @@ export function AgentChat() {
     }
   }
 
+  // 选会话后自动关 drawer
+  const handleSelectConversation = useCallback((id: string) => {
+    store.selectConversation(id)
+    setDrawerOpen(false)
+  }, [store])
+
   if (!isLoggedIn) {
     return (
       <div className="flex flex-col items-center justify-center h-full py-32 text-muted-foreground">
@@ -188,48 +178,85 @@ export function AgentChat() {
     )
   }
 
-  return (
-    <div className="flex h-full gap-0">
-      {/* 左侧会话列表 */}
-      <div className="w-64 shrink-0 border-r flex flex-col bg-muted/30">
-        <div className="p-3 border-b">
-          <Button
-            className="w-full"
-            size="sm"
-            onClick={() => store.createConversation()}
-          >
-            <Plus className="size-3.5 mr-1" />新对话
-          </Button>
-        </div>
-        <div className="flex-1 overflow-auto">
-          {store.conversations.map(conv => (
-            <div
-              key={conv.id}
-              className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-muted transition-colors ${
-                store.currentConversationId === conv.id ? 'bg-muted border-l-2 border-primary' : ''
-              }`}
-              onClick={() => store.selectConversation(conv.id)}
-            >
-              <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="flex-1 text-sm truncate">{conv.title}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); store.deleteConversation(conv.id) }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </div>
-          ))}
-          {store.conversations.length === 0 && (
-            <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-              暂无会话，点击上方按钮创建
-            </div>
-          )}
-        </div>
+  // 侧栏内容
+  const sidebarContent = (
+    <>
+      <div className="p-3 border-b">
+        <Button
+          className="w-full"
+          size="sm"
+          onClick={() => { store.createConversation(); setDrawerOpen(false) }}
+        >
+          <Plus className="size-3.5 mr-1" />新对话
+        </Button>
       </div>
+      <div className="flex-1 overflow-auto">
+        {store.conversations.map(conv => (
+          <div
+            key={conv.id}
+            className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-muted transition-colors ${
+              store.currentConversationId === conv.id ? 'bg-muted border-l-2 border-primary' : ''
+            }`}
+            onClick={() => handleSelectConversation(conv.id)}
+          >
+            <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex-1 text-sm truncate">{conv.title}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); store.deleteConversation(conv.id) }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+        ))}
+        {store.conversations.length === 0 && (
+          <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+            暂无会话，点击上方按钮创建
+          </div>
+        )}
+      </div>
+    </>
+  )
 
-      {/* 右侧对话区 */}
+  return (
+    <div className="flex h-full relative">
+      {/* ----- 手机端遮罩 ----- */}
+      {drawerOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 sm:hidden"
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
+
+      {/* ----- 侧栏：桌面端固定 | 手机端抽屉 (relative 挤走主内容) ----- */}
+      <aside className={`
+        w-64 shrink-0 border-r bg-muted/30 h-full flex flex-col
+        sm:relative sm:translate-x-0
+        fixed sm:inset-auto inset-y-0 left-0 z-40
+        transition-transform duration-300 ease-in-out
+        ${drawerOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'}
+      `}>
+        {sidebarContent}
+      </aside>
+
+      {/* ----- 右侧对话区 ----- */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* 顶部条 — 手机端有汉堡 + 标题 */}
+        <div className="sm:hidden flex items-center gap-2 px-3 py-2 border-b shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            onClick={() => setDrawerOpen(!drawerOpen)}
+            aria-label="打开侧栏"
+          >
+            <Menu className="size-5" />
+          </Button>
+          <span className="text-sm font-medium truncate">
+            {store.conversations.find(c => c.id === store.currentConversationId)?.title || 'AI Agent'}
+          </span>
+        </div>
+
         {/* 消息列表 */}
         <div ref={scrollRef} className="flex-1 overflow-auto px-4 py-6 space-y-6">
           {store.messages.length === 0 && !store.loading ? (
@@ -237,20 +264,6 @@ export function AgentChat() {
               <Bot className="size-16 mb-4 opacity-20" />
               <p className="text-lg font-medium mb-2">AI Agent</p>
               <p className="text-sm">开始一个新的对话，我可以帮你查询数据、管理文件和执行操作</p>
-              {store.tools.length > 0 && (
-                <div className="mt-6 flex flex-wrap gap-2 justify-center max-w-md">
-                  {store.tools.map(tool => (
-                    <Badge
-                      key={tool.name}
-                      variant={tool.available ? 'default' : 'secondary'}
-                      className="text-xs"
-                    >
-                      <Wrench className="size-2.5 mr-1" />
-                      {tool.name}
-                    </Badge>
-                  ))}
-                </div>
-              )}
             </div>
           ) : (
             store.messages.map((msg, idx) => (
@@ -315,8 +328,6 @@ export function AgentChat() {
             >
               {isConnecting ? (
                 <Loader2 className="size-4 animate-spin" />
-              ) : isRecording ? (
-                <Mic className="size-5" />
               ) : (
                 <Mic className="size-5" />
               )}
