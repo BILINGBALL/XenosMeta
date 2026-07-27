@@ -60,9 +60,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const items = res.data?.items || []
       set({ conversations: items, loading: false })
 
-      // 首次进入：没有当前会话且没有历史会话 → 自动创建
-      if (!get().currentConversationId && items.length === 0) {
-        get().createConversation()
+      // 首次进入：没有当前会话 → 自动创建（如果还有历史会话也选第一个）
+      const { currentConversationId } = get()
+      if (!currentConversationId) {
+        if (items.length > 0) {
+          await get().selectConversation(items[0].id)
+        } else {
+          await get().createConversation()
+        }
       }
     } catch (e) {
       set({ loading: false, error: (e as Error).message })
