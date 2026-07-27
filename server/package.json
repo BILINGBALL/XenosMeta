@@ -23,8 +23,10 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@types/ali-oss": "^6.23.3",
     "@types/multer": "^2.2.0",
     "@types/ws": "^8.18.1",
+    "ali-oss": "^6.23.0",
     "axios": "^1.16.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",

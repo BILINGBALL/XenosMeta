@@ -1,27 +1,50 @@
-import { Client } from 'minio'
+/**
+ * OSS 存储配置 — 阿里云 OSS (ali-oss SDK)
+ *
+ * 兼容层：对外暴露与 minio 相同的 API 签名，file.service.ts 无需修改。
+ *
+ * .env 配置项：
+ *   OSS_ENDPOINT       — OSS endpoint，例如 oss-cn-hangzhou.aliyuncs.com
+ *   OSS_REGION         — OSS region，例如 oss-cn-hangzhou
+ *   OSS_ACCESS_KEY     — RAM AccessKeyId
+ *   OSS_ACCESS_SECRET  — RAM AccessKeySecret
+ *   OSS_BUCKET         — Bucket 名称
+ *   OSS_INTERNAL       — 是否使用内网 endpoint（ECS 同 region 免流量），默认 false
+ *   OSS_SECURE         — 是否 HTTPS，默认 true
+ */
 
-const MINIO_ENDPOINT = process.env.MINIO_ENDPOINT || 'localhost'
-const MINIO_PORT = parseInt(process.env.MINIO_PORT || '9000', 10)
-const MINIO_USE_SSL = process.env.MINIO_USE_SSL === 'true' || process.env.MINIO_PORT === '443'
-const MINIO_ACCESS_KEY = process.env.MINIO_ACCESS_KEY || 'minioadmin'
-const MINIO_SECRET_KEY = process.env.MINIO_SECRET_KEY || 'minioadmin'
-export const MINIO_BUCKET = process.env.MINIO_BUCKET || 'auth-core-files'
-// 阿里云 OSS 等需要自定义 region 时使用
-const MINIO_REGION = process.env.MINIO_REGION || ''
+import OSS from 'ali-oss'
+import { Readable } from 'stream'
 
-let client: Client | null = null
+// ---- 环境变量读取 ----
+const OSS_REGION = process.env.OSS_REGION || process.env.MINIO_REGION || 'oss-cn-hangzhou'
+const OSS_ACCESS_KEY = process.env.OSS_ACCESS_KEY || process.env.MINIO_ACCESS_KEY || ''
+const OSS_ACCESS_SECRET = process.env.OSS_ACCESS_SECRET || process.env.MINIO_SECRET_KEY || ''
+export const MINIO_BUCKET = process.env.OSS_BUCKET || process.env.MINIO_BUCKET || 'xenosmeta'
+const OSS_INTERNAL = process.env.OSS_INTERNAL === 'true'
+const OSS_SECURE = process.env.OSS_SECURE !== 'false'
+
+let client: OSS | null = null
 let available = false
 
-function getClient(): Client {
+function buildEndpoint(): string {
+  if (OSS_INTERNAL) {
+    return `${OSS_REGION}-internal.aliyuncs.com`
+  }
+  return `${OSS_REGION}.aliyuncs.com`
+}
+
+function getClient(): OSS {
   if (!client) {
-    client = new Client({
-      endPoint: MINIO_ENDPOINT,
-      port: MINIO_PORT,
-      useSSL: MINIO_USE_SSL,
-      accessKey: MINIO_ACCESS_KEY,
-      secretKey: MINIO_SECRET_KEY,
-      // 阿里云 OSS 等 S3 兼容服务可能需要指定 region
-      ...(MINIO_REGION ? { region: MINIO_REGION } : {}),
+    client = new OSS({
+      region: OSS_REGION,
+      accessKeyId: OSS_ACCESS_KEY,
+      accessKeySecret: OSS_ACCESS_SECRET,
+      bucket: MINIO_BUCKET,
+      secure: OSS_SECURE,
+      timeout: 600000,
+      // 内网 endpoint
+      ...(OSS_INTERNAL ? { endpoint: buildEndpoint() } : {}),
     })
   }
   return client
@@ -31,25 +54,78 @@ export function isMinioAvailable(): boolean {
   return available
 }
 
-export function getMinioClient(): Client {
+/**
+ * 兼容层 — 模拟 minio.Client 接口
+ * file.service.ts 调用的方法都在这里桥接到 ali-oss
+ */
+class OssCompatClient {
+  private oss: OSS
+
+  constructor(oss: OSS) {
+    this.oss = oss
+  }
+
+  /** minio.putObject → oss.put */
+  async putObject(bucket: string, objectName: string, stream: Readable, size?: number, metadata?: Record<string, string>) {
+    const buffers: Buffer[] = []
+    for await (const chunk of stream) { buffers.push(chunk) }
+    const buffer = Buffer.concat(buffers)
+
+    const headers: Record<string, string> = {}
+    if (metadata?.['Content-Type']) {
+      headers['Content-Type'] = metadata['Content-Type']
+    }
+
+    return this.oss.put(objectName, buffer, { headers }) as any
+  }
+
+  /** minio.getObject → oss.get (返回 stream) */
+  async getObject(bucket: string, objectName: string): Promise<Readable> {
+    const result = await this.oss.get(objectName)
+    return Readable.from(result.content as Buffer)
+  }
+
+  /** minio.removeObject → oss.delete */
+  async removeObject(bucket: string, objectName: string) {
+    await this.oss.delete(objectName)
+  }
+
+  /** minio.presignedGetObject → oss.signatureUrl */
+  async presignedGetObject(bucket: string, objectName: string, expires: number): Promise<string> {
+    return this.oss.signatureUrl(objectName, { expires })
+  }
+
+  /** minio.bucketExists → oss.getBucketInfo */
+  async bucketExists(bucket: string): Promise<boolean> {
+    try {
+      await this.oss.getBucketInfo(bucket)
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
+let compatClient: OssCompatClient | null = null
+
+export function getMinioClient(): OssCompatClient {
   if (!available) throw new Error('OSS 存储服务不可用，请联系管理员')
-  return getClient()
+  if (!compatClient) {
+    compatClient = new OssCompatClient(getClient())
+  }
+  return compatClient
 }
 
 export async function ensureBucket(): Promise<void> {
+  const displayEndpoint = buildEndpoint()
   try {
     const c = getClient()
-    const exists = await c.bucketExists(MINIO_BUCKET)
-    if (!exists) {
-      // 阿里云 OSS 的 bucket 在控制台创建，不要在代码中创建
-      console.warn(`[OSS] Bucket "${MINIO_BUCKET}" 不存在，请到 OSS 控制台创建`)
-      available = false
-      return
-    }
+    const info = await c.getBucketInfo(MINIO_BUCKET)
     available = true
-    console.log(`[OSS] Connected to ${MINIO_USE_SSL ? 'https' : 'http'}://${MINIO_ENDPOINT}:${MINIO_PORT}, bucket "${MINIO_BUCKET}" ready`)
+    console.log(`[OSS] Connected to ${OSS_SECURE ? 'https' : 'http'}://${displayEndpoint}, bucket "${MINIO_BUCKET}" ready`)
   } catch (e: any) {
-    console.warn(`[OSS] Not available at ${MINIO_ENDPOINT}:${MINIO_PORT} — ${e.message || e.code || 'connection failed'}. File upload disabled.`)
+    const msg = e.message || e.code || 'connection failed'
+    console.warn(`[OSS] Not available at ${displayEndpoint}:${OSS_SECURE ? 443 : 80} — ${msg}. File upload disabled.`)
     available = false
   }
 }
