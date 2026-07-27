@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
 export interface UseSpeechRecognitionOptions {
   onFinalText?: (text: string) => void

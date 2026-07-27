@@ -427,7 +427,7 @@ export function FileManager() {
                       <>
                         <FileTypeIcon mimeType={f.mimeType} filename={f.filename} className="size-8 opacity-20" />
                         <img
-                          src={`${process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'}/file/${f.fileId}/thumbnail?w=200&_token=${token}`}
+                          src={`${process.env.NEXT_PUBLIC_API_URL || ''}/file/${f.fileId}/thumbnail?w=200&_token=${token}`}
                           alt={displayFileName(f)}
                           className="absolute inset-0 max-h-full max-w-full object-contain m-auto p-1"
                           loading="lazy"

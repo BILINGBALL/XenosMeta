@@ -177,7 +177,7 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || ''
 
   useEffect(() => {
     if (!file) { setDownloadUrl(''); setLoadedUrl(null); return }

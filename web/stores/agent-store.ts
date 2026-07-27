@@ -14,7 +14,7 @@ import type {
   AgentSSEEventData,
 } from '@/types'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
 interface AgentState {
   // 会话列表

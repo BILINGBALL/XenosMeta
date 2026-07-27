@@ -178,6 +178,11 @@
 
 <script>
 (function() {
+  // ===================================================================
+  // API address — this is a static file under public/, not affected by
+  // Next.js build injection. Hardcoded value here. For local testing,
+  // change it to http://localhost:3001/api manually.
+  // ===================================================================
   var API = 'https://www.oxth.com/api';
 
   function $(id) { return document.getElementById(id); }
