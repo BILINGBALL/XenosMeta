@@ -69,10 +69,13 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: async () => {
-        try {
-          await apiClient.post('/user/logout')
-        } catch {
-          // ignore logout errors
+        const token = useAuthStore.getState().accessToken
+        // Fire-and-forget via fetch — NOT apiClient, to avoid re-entering the 401 interceptor
+        if (token) {
+          fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://www.oxth.com/api'}/user/logout`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {})
         }
         set({
           accessToken: null,

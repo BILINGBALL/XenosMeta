@@ -22,6 +22,7 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 // ==================== Auto-refresh logic ====================
 
 let isRefreshing = false
+let isLoggedOut = false
 let pendingQueue: Array<{
   resolve: (token: string) => void
   reject: (err: Error) => void
@@ -40,20 +41,21 @@ apiClient.interceptors.response.use(
   async (error: AxiosError<{ message?: string }>) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
-    // Only handle 401, and only if not already retrying
-    if (error.response?.status !== 401 || originalRequest._retry) {
+    // Only handle 401, and only if not already retrying + not already logged out
+    if (error.response?.status !== 401 || originalRequest._retry || isLoggedOut) {
       const msg = error.response?.data?.message || error.message || 'Request failed'
       return Promise.reject(new Error(msg))
     }
 
-    // Don't try to refresh on login/refresh endpoints themselves
-    if (originalRequest.url?.includes('/user/login') || originalRequest.url?.includes('/user/refresh')) {
+    // Don't try to refresh on login/refresh/logout endpoints themselves
+    if (originalRequest.url?.includes('/user/login') || originalRequest.url?.includes('/user/refresh') || originalRequest.url?.includes('/user/logout')) {
       return Promise.reject(new Error(error.response?.data?.message || '认证失败'))
     }
 
     const { refreshToken } = useAuthStore.getState()
     if (!refreshToken) {
-      // No refresh token — force logout
+      // No refresh token — force logout once
+      isLoggedOut = true
       useAuthStore.getState().logout()
       return Promise.reject(new Error('登录已过期，请重新登录'))
     }
@@ -89,6 +91,7 @@ apiClient.interceptors.response.use(
       return apiClient(originalRequest)
     } catch (refreshError) {
       processQueue(refreshError as Error, null)
+      isLoggedOut = true
       useAuthStore.getState().logout()
       return Promise.reject(new Error('登录已过期，请重新登录'))
     } finally {
