@@ -28,7 +28,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                         <span className="text-muted-foreground">Server:</span>
-                        <code className="bg-muted px-2 py-0.5 rounded text-xs">http://localhost:3001/api</code>
+                        <code className="bg-muted px-2 py-0.5 rounded text-xs">https://www.oxth.com/api</code>
                         {isLoggedIn && <Badge variant="default" className="ml-2">已连接</Badge>}
                         {!isLoggedIn && <Badge variant="secondary" className="ml-2">未登录</Badge>}
                     </div>
