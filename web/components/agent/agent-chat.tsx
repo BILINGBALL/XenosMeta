@@ -275,7 +275,6 @@ export function AgentChat() {
                 const timer = setTimeout(() => {
                   longPressRef.current.triggered = true
                   setMenuOpenId(conv.id)
-                  if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(15)
                 }, 500)
                 longPressRef.current = { timer, triggered: false, startX, startY }
               }}
@@ -527,8 +526,15 @@ export function AgentChat() {
         {/* 输入区 */}
         <div className="shrink-0 border-t px-4 py-4">
           {store.error && (
-            <div className="mb-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-xs">
-              {store.error}
+            <div className="mb-2 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-xs">
+              <span className="truncate">{store.error}</span>
+              <button
+                onClick={() => store.clearError()}
+                className="shrink-0 text-destructive/70 hover:text-destructive"
+                aria-label="关闭提示"
+              >
+                <X className="size-3.5" />
+              </button>
             </div>
           )}
           {asrError && (

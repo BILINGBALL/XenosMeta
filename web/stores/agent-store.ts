@@ -41,6 +41,34 @@ interface AgentState {
   fetchTools: () => Promise<void>
   sendMessage: (content: string) => Promise<void>
   clearMessages: () => void
+  clearError: () => void
+}
+
+/**
+ * 清理空会话：若当前会话没有任何消息，则从本地和后端删除。
+ * 用于用户点击「新对话」后未发消息就切走的场景，避免堆积无用记录。
+ */
+async function cleanupEmptyConversation(
+  get: () => AgentState,
+  set: (fn: (state: AgentState) => Partial<AgentState>) => void,
+) {
+  const { currentConversationId, messages, conversations } = get()
+  if (!currentConversationId || messages.length > 0) return
+
+  const emptyId = currentConversationId
+  // 本地先移除并清空 currentConversationId，避免后续操作指向已删除的会话
+  set({
+    conversations: conversations.filter(c => c.id !== emptyId),
+    currentConversationId: null,
+    messages: [],
+  })
+
+  // 后端静默删除
+  try {
+    await apiClient.delete(`/agent/conversations/${emptyId}`)
+  } catch {
+    // 忽略：网络错误等不阻断后续操作
+  }
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
@@ -72,11 +100,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
       }
     } catch (e) {
-      set({ loading: false, error: (e as Error).message })
+      // 加载失败不阻断使用：静默失败，允许用户手动新建会话
+      set({ loading: false, error: null, conversations: [] })
     }
   },
 
   createConversation: async (title?: string) => {
+    // 若当前会话已是空会话（无消息），直接复用，避免堆积无意义的空会话
+    const { currentConversationId: curId, messages: curMsgs } = get()
+    if (curId && curMsgs.length === 0) {
+      return curId
+    }
+
     try {
       const res = await postAction<AgentConversation>('/agent/conversations', { title })
       const conv = res.data
@@ -97,6 +132,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   selectConversation: async (id: string) => {
+    // 切换前若当前会话为空会话（无消息），先删除避免堆积无用记录
+    await cleanupEmptyConversation(get, set)
+
     set({ currentConversationId: id, loading: true, error: null, messages: [], totalTokens: 0 })
     try {
       const res = await apiClient.get<unknown, { data: { conversation: AgentConversation; messages: AgentMessage[] } }>(
@@ -286,6 +324,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   clearMessages: () => set({ messages: [], totalTokens: 0 }),
+
+  clearError: () => set({ error: null }),
 }))
 
 /** 处理 SSE 事件，更新前端状态 */
