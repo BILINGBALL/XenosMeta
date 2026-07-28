@@ -208,6 +208,55 @@
     return false;
   }
 
+  // Persist updated auth state back to localStorage
+  function saveAuthState(state) {
+    try {
+      localStorage.setItem('auth-core-auth', JSON.stringify({ state: state, version: 0 }));
+    } catch(e) {}
+  }
+
+  // Async validate token validity; if expired, try refresh; if refresh fails, log out
+  function validateToken() {
+    var raw;
+    try { raw = localStorage.getItem('auth-core-auth'); } catch(e) { return; }
+    if (!raw) return;
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch(e) { return; }
+    var state = parsed && parsed.state;
+    if (!state || !state.isLoggedIn || !state.accessToken) return;
+
+    fetch(API + '/user/permissions', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + state.accessToken }
+    }).then(function(r) {
+      if (r.status === 401) {
+        // Token expired — try refresh
+        if (!state.refreshToken) throw new Error('no refresh token');
+        return fetch(API + '/user/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: state.refreshToken })
+        }).then(function(rr) {
+          if (!rr.ok) throw new Error('refresh failed');
+          return rr.json();
+        }).then(function(d) {
+          if (d && d.data && d.data.accessToken) {
+            state.accessToken = d.data.accessToken;
+            if (d.data.refreshToken) state.refreshToken = d.data.refreshToken;
+            saveAuthState(state);
+          } else {
+            throw new Error('no token in refresh response');
+          }
+        });
+      }
+      if (!r.ok) throw new Error('validate failed: ' + r.status);
+    }).catch(function() {
+      // Token invalid and refresh failed — clear auth state
+      try { localStorage.removeItem('auth-core-auth'); } catch(e) {}
+      showLoggedOutUI();
+    });
+  }
+
   function showLoggedInUI() {
     $('nav-btns-auth').style.display = 'none';
     $('nav-btns-logged-in').style.display = 'flex';
@@ -229,6 +278,8 @@
   // Init auth state on page load
   if (checkAuth()) {
     showLoggedInUI();
+    // Async validate token — if expired and refresh fails, switch back to logged-out UI
+    validateToken();
   } else {
     showLoggedOutUI();
   }

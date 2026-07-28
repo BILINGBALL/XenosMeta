@@ -400,6 +400,8 @@ export interface AgentConversation {
   tokenUsage: number
   createdAt: string
   updatedAt: string
+  /** 最后一条消息的预览文本（截断），供侧边栏展示 */
+  lastMessagePreview?: string | null
 }
 
 /** Agent 消息角色 */

@@ -6,7 +6,9 @@ import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu, ArrowLeft, Search, UserCog, LogOut } from 'lucide-react'
+import Link from 'next/link'
 import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
 import type { ChatDisplayMessage, ToolEvent } from '@/types'
 
@@ -99,6 +101,7 @@ export function AgentChat() {
   const { isLoggedIn } = useAuthStore()
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // 语音识别
@@ -179,86 +182,149 @@ export function AgentChat() {
   }
 
   // 侧栏内容
+  const user = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
+
+  const filteredConversations = store.conversations.filter(conv => {
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase()
+    return conv.title.toLowerCase().includes(q) ||
+      (conv.lastMessagePreview || '').toLowerCase().includes(q)
+  })
+
   const sidebarContent = (
     <>
-      <div className="p-3 border-b">
+      {/* 顶部：搜索 + 新对话 */}
+      <div className="p-3 border-b space-y-3 shrink-0">
+        <div className="relative">
+          <Search className="size-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索会话"
+            className="pl-8 h-10"
+          />
+        </div>
         <Button
-          className="w-full"
-          size="sm"
-          onClick={() => { store.createConversation(); setDrawerOpen(false) }}
+          className="w-full h-10"
+          onClick={() => { store.createConversation(); setDrawerOpen(false); setSearchQuery('') }}
         >
-          <Plus className="size-3.5 mr-1" />新对话
+          <Plus className="size-4 mr-1.5" />新对话
         </Button>
       </div>
-      <div className="flex-1 overflow-auto">
-        {store.conversations.map(conv => (
+
+      {/* 中间：会话列表（可滚动） */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        {filteredConversations.map(conv => (
           <div
             key={conv.id}
-            className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-muted transition-colors ${
+            className={`group flex items-start gap-2.5 px-3 py-3 cursor-pointer hover:bg-muted transition-colors ${
               store.currentConversationId === conv.id ? 'bg-muted border-l-2 border-primary' : ''
             }`}
             onClick={() => handleSelectConversation(conv.id)}
           >
-            <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="flex-1 text-sm truncate">{conv.title}</span>
-            <button
-              onClick={(e) => { e.stopPropagation(); store.deleteConversation(conv.id) }}
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-            >
-              <Trash2 className="size-3.5" />
-            </button>
+            <MessageSquare className="size-4 shrink-0 text-muted-foreground mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-sm font-medium truncate">{conv.title}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); store.deleteConversation(conv.id) }}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+              {conv.lastMessagePreview && (
+                <p className="text-xs text-muted-foreground truncate mt-1">{conv.lastMessagePreview}</p>
+              )}
+            </div>
           </div>
         ))}
-        {store.conversations.length === 0 && (
+        {filteredConversations.length === 0 && (
           <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-            暂无会话，点击上方按钮创建
+            {searchQuery.trim() ? '未找到匹配的会话' : '暂无会话，点击上方按钮创建'}
           </div>
         )}
+      </div>
+
+      {/* 底部：个人中心（固定） */}
+      <div className="shrink-0 border-t p-3 bg-muted/20">
+        <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-muted/50 transition-colors">
+          <div className="shrink-0 size-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+            <User className="size-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium truncate">
+              {user?.nickname || user?.username || '用户'}
+            </div>
+            <div className="text-xs text-muted-foreground truncate">
+              {user?.username || ''}
+            </div>
+          </div>
+          <button
+            onClick={() => logout()}
+            className="shrink-0 size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
+            title="退出登录"
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
       </div>
     </>
   )
 
   return (
-    <div className="flex h-full relative">
-      {/* ----- 手机端遮罩 ----- */}
-      {drawerOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/30 sm:hidden"
-          onClick={() => setDrawerOpen(false)}
-        />
-      )}
-
-      {/* ----- 侧栏：桌面端固定 | 手机端抽屉 (relative 挤走主内容) ----- */}
+    <div className="flex h-full overflow-hidden">
+      {/* ----- 侧栏：push 抽屉 -----
+          手机端关闭时 -ml-64 将侧栏拉出视口（overflow-hidden 裁剪），
+          开启时 ml-0 让侧栏归位、主区域自然被挤右；
+          桌面端 sm:ml-0 始终可见。
+          transition-[margin] 让侧栏滑入与主区域让位同步动画。 */}
       <aside className={`
         w-64 shrink-0 border-r bg-muted/30 h-full flex flex-col
-        sm:relative sm:translate-x-0
-        fixed sm:inset-auto inset-y-0 left-0 z-40
-        transition-transform duration-300 ease-in-out
-        ${drawerOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'}
+        transition-[margin] duration-300 ease-in-out
+        ${drawerOpen ? 'ml-0' : '-ml-64 sm:ml-0'}
       `}>
         {sidebarContent}
       </aside>
 
       {/* ----- 右侧对话区 ----- */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* 顶部条 — 手机端有汉堡 + 标题 */}
-        <div className="sm:hidden flex items-center gap-2 px-3 py-2 border-b shrink-0">
+      <div className="relative flex-1 min-h-0 flex flex-col min-w-0">
+        {/* 手机端：抽屉打开时虚化主聊天区并屏蔽交互，点击任意空白处关闭抽屉。
+            放在 chat 区内部、absolute inset-0，不会覆盖左侧 sidebar，
+            因此点击 sidebar 内的会话仍可正常切换。 */}
+        {drawerOpen && (
+          <div
+            className="sm:hidden absolute inset-0 z-20 bg-background/30 backdrop-blur-[2px] cursor-pointer"
+            onClick={() => setDrawerOpen(false)}
+            aria-hidden
+          />
+        )}
+        {/* 顶部条 — 手机端：汉堡 + 返回 + 当前会话标题 */}
+        <div className="sm:hidden h-14 flex items-center gap-1 px-3 border-b shrink-0">
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0"
+            className="shrink-0 size-11"
             onClick={() => setDrawerOpen(!drawerOpen)}
-            aria-label="打开侧栏"
+            aria-label="切换侧栏"
           >
             <Menu className="size-5" />
           </Button>
-          <span className="text-sm font-medium truncate">
+          <Link
+            href="/app"
+            className="shrink-0 flex items-center justify-center size-11 rounded-md hover:bg-muted transition-colors text-muted-foreground"
+            aria-label="返回"
+          >
+            <ArrowLeft className="size-5" />
+          </Link>
+          <span className="text-lg font-semibold truncate flex-1 mr-2">
             {store.conversations.find(c => c.id === store.currentConversationId)?.title || 'AI Agent'}
           </span>
         </div>
 
         {/* 消息列表 */}
-        <div ref={scrollRef} className="flex-1 overflow-auto px-4 py-6 space-y-6">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto px-4 py-6 space-y-6">
           {store.messages.length === 0 && !store.loading ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <Bot className="size-16 mb-4 opacity-20" />
@@ -282,7 +348,7 @@ export function AgentChat() {
         </div>
 
         {/* 输入区 */}
-        <div className="shrink-0 border-t px-4 py-3">
+        <div className="shrink-0 border-t px-4 py-4">
           {store.error && (
             <div className="mb-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-xs">
               {store.error}
@@ -308,8 +374,8 @@ export function AgentChat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isRecording ? '请开始说话...' : '输入消息，Enter 发送，Shift+Enter 换行，或按住麦克风说话'}
-              className={`flex-1 min-h-[40px] max-h-32 resize-none transition-colors ${isRecording ? 'border-red-500 bg-red-50/30' : ''}`}
+              placeholder={isRecording ? '请开始说话...' : '输入消息，或按住麦克风说话'}
+              className={`flex-1 min-h-[44px] max-h-32 resize-none transition-colors ${isRecording ? 'border-red-500 bg-red-50/30' : ''}`}
               rows={1}
               disabled={store.streaming}
             />
@@ -322,7 +388,7 @@ export function AgentChat() {
               className={`shrink-0 flex items-center justify-center select-none cursor-pointer transition-all duration-150 ${
                 isRecording
                   ? 'size-12 rounded-full bg-red-500 text-white shadow-lg shadow-red-500/40 scale-110'
-                  : 'size-10 rounded-full bg-muted text-muted-foreground hover:bg-muted-foreground/20 active:scale-95'
+                  : 'size-11 rounded-full bg-muted text-muted-foreground hover:bg-muted-foreground/20 active:scale-95'
               } ${store.streaming ? 'opacity-50 pointer-events-none' : ''}`}
               title={isRecording ? '松开结束' : '按住说话'}
             >
@@ -336,7 +402,7 @@ export function AgentChat() {
               onClick={handleSend}
               disabled={!input.trim() || store.streaming || !store.currentConversationId}
               size="icon"
-              className="shrink-0"
+              className="shrink-0 size-11"
             >
               {store.streaming ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
             </Button>

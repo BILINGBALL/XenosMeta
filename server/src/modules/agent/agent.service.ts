@@ -45,18 +45,32 @@ export async function createConversation(userId: string, tenantId: string, title
     })
 }
 
-/** 获取会话列表 */
+/** 获取会话列表（含最后一条消息预览，供侧边栏展示） */
 export async function listConversations(userId: string, tenantId: string, page = 1, pageSize = 20) {
     const where = { userId, tenantId, deletedAt: null }
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
         prisma.agentConversation.findMany({
             where,
             orderBy: { updatedAt: 'desc' },
             skip: (page - 1) * pageSize,
             take: pageSize,
+            include: {
+                messages: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 1,
+                    select: { content: true, role: true },
+                },
+            },
         }),
         prisma.agentConversation.count({ where }),
     ])
+    // 映射：把最后一条消息内容截断为预览文本
+    const items = rawItems.map(c => {
+        const { messages, ...rest } = c
+        const lastMsg = messages[0]
+        const preview = lastMsg ? lastMsg.content.replace(/\s+/g, ' ').trim().slice(0, 80) : null
+        return { ...rest, lastMessagePreview: preview || null }
+    })
     return { items, total, page, pageSize }
 }
 
@@ -172,6 +186,19 @@ export async function executeChat(
     try {
         // 1. 保存用户消息
         await saveUserMessage(conversationId, userMessage)
+
+        // 1.5. 首次对话时自动用用户首句设置标题，方便侧边栏识别
+        const userMsgCount = await prisma.agentMessage.count({
+            where: { conversationId, role: 'user' },
+        })
+        if (userMsgCount === 1) {
+            const trimmed = userMessage.trim()
+            const newTitle = trimmed.slice(0, 30) + (trimmed.length > 30 ? '…' : '')
+            await prisma.agentConversation.update({
+                where: { id: conversationId },
+                data: { title: newTitle },
+            })
+        }
 
         // 2. 加载历史消息（最近 20 条，防止 token 爆炸）
         const dbMessages = await prisma.agentMessage.findMany({
