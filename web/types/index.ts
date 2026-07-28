@@ -396,6 +396,7 @@ export interface AgentConversation {
   userId: string
   tenantId: string
   status: 'active' | 'archived'
+  pinned: boolean
   callCount: number
   tokenUsage: number
   createdAt: string

@@ -9,6 +9,7 @@ import {
     listConversations,
     getConversationMessages,
     deleteConversation,
+    updateConversation,
     executeChat,
     checkRateLimit,
     checkConversationLimit,
@@ -103,6 +104,17 @@ class AgentController {
         const ok = await deleteConversation(req.params.id, req.userId!, req.tenantId!)
         if (!ok) return res.status(404).json(notFound('会话不存在'))
         res.json(success(null, '删除成功'))
+    })
+
+    /** PATCH /api/agent/conversations/:id — 更新会话（重命名、置顶） */
+    updateConversation = asyncHandler(async (req: Request, res: Response) => {
+        const { title, pinned } = req.body as { title?: string; pinned?: boolean }
+        if (title === undefined && pinned === undefined) {
+            return res.status(400).json(fail('缺少 title 或 pinned 字段'))
+        }
+        const conv = await updateConversation(req.params.id, req.userId!, req.tenantId!, { title, pinned })
+        if (!conv) return res.status(404).json(notFound('会话不存在'))
+        res.json(success(conv, '更新成功'))
     })
 
     /**

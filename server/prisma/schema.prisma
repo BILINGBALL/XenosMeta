@@ -424,6 +424,7 @@ model AgentConversation {
   userId      String
   tenantId    String
   status      String   @default("active") // "active" | "archived"
+  pinned      Boolean  @default(false)    // 是否置顶
   callCount   Int      @default(0)        // 本会话 LLM 调用次数
   tokenUsage  Int      @default(0)        // 累计 token 消耗
   deletedAt   DateTime? @db.Timestamptz(3)
@@ -434,6 +435,7 @@ model AgentConversation {
 
   @@index([userId, deletedAt])
   @@index([tenantId])
+  @@index([userId, pinned, updatedAt])
   @@map("agent_conversation")
 }
 

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu, ArrowLeft, Search, UserCog, LogOut } from 'lucide-react'
+import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu, ArrowLeft, Search, UserCog, LogOut, MoreVertical, Pin, PinOff, Pencil } from 'lucide-react'
 import Link from 'next/link'
 import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
 import type { ChatDisplayMessage, ToolEvent } from '@/types'
@@ -104,7 +104,12 @@ export function AgentChat() {
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null) // 当前打开菜单的会话 id
+  const [renamingId, setRenamingId] = useState<string | null>(null)  // 当前重命名的会话 id
+  const [renameValue, setRenameValue] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 长按检测：500ms 触发，pointerup/leave/cancel 清除；触发后阻止本次 click 选会话
+  const longPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; triggered: boolean; startX?: number; startY?: number }>({ timer: null, triggered: false })
 
   // 语音识别
   const {
@@ -114,6 +119,7 @@ export function AgentChat() {
     error: asrError,
     startRecording,
     stopRecording,
+    clearError: clearAsrError,
   } = useSpeechRecognition({
     onPartialText: (text) => {
       setInput(text)
@@ -172,6 +178,40 @@ export function AgentChat() {
     setDrawerOpen(false)
   }, [store])
 
+  // 开始重命名
+  const handleStartRename = (id: string, currentTitle: string) => {
+    setRenamingId(id)
+    setRenameValue(currentTitle)
+    setMenuOpenId(null)
+  }
+
+  // 确认重命名
+  const handleConfirmRename = () => {
+    if (renamingId && renameValue.trim()) {
+      store.renameConversation(renamingId, renameValue.trim())
+    }
+    setRenamingId(null)
+    setRenameValue('')
+  }
+
+  // 取消重命名
+  const handleCancelRename = () => {
+    setRenamingId(null)
+    setRenameValue('')
+  }
+
+  // 切换置顶
+  const handleTogglePin = (id: string, pinned: boolean) => {
+    store.togglePin(id, !pinned)
+    setMenuOpenId(null)
+  }
+
+  // 删除会话
+  const handleDelete = (id: string) => {
+    store.deleteConversation(id)
+    setMenuOpenId(null)
+  }
+
   if (!isLoggedIn) {
     return (
       <div className="flex flex-col items-center justify-center h-full py-32 text-muted-foreground">
@@ -214,31 +254,164 @@ export function AgentChat() {
 
       {/* 中间：会话列表（可滚动） */}
       <div className="flex-1 min-h-0 overflow-auto">
-        {filteredConversations.map(conv => (
-          <div
-            key={conv.id}
-            className={`group flex items-start gap-2.5 px-3 py-3 cursor-pointer hover:bg-muted transition-colors ${
-              store.currentConversationId === conv.id ? 'bg-muted border-l-2 border-primary' : ''
-            }`}
-            onClick={() => handleSelectConversation(conv.id)}
-          >
-            <MessageSquare className="size-4 shrink-0 text-muted-foreground mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-sm font-medium truncate">{conv.title}</span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); store.deleteConversation(conv.id) }}
-                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 className="size-4" />
-                </button>
+        <div className="px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          历史对话
+        </div>
+        {filteredConversations.map(conv => {
+          const isRenaming = renamingId === conv.id
+          const isMenuOpen = menuOpenId === conv.id
+          return (
+            <div
+              key={conv.id}
+              style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'manipulation' }}
+              className={`group relative flex items-start gap-2.5 px-3 py-3 cursor-pointer hover:bg-muted transition-colors select-none ${
+                store.currentConversationId === conv.id ? 'bg-muted border-l-2 border-primary' : ''
+              }`}
+              onContextMenu={(e) => e.preventDefault()}
+              onPointerDown={(e) => {
+                if (isRenaming || e.button !== 0) return
+                const startX = e.clientX
+                const startY = e.clientY
+                const timer = setTimeout(() => {
+                  longPressRef.current.triggered = true
+                  setMenuOpenId(conv.id)
+                  if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(15)
+                }, 500)
+                longPressRef.current = { timer, triggered: false, startX, startY }
+              }}
+              onPointerMove={(e) => {
+                // 手指移动超过 10px 视为滚动，取消长按
+                const ref = longPressRef.current
+                if (ref.timer && ref.startX !== undefined && ref.startY !== undefined) {
+                  const dx = Math.abs(e.clientX - ref.startX)
+                  const dy = Math.abs(e.clientY - ref.startY)
+                  if (dx > 10 || dy > 10) {
+                    clearTimeout(ref.timer)
+                    ref.timer = null
+                  }
+                }
+              }}
+              onPointerUp={() => {
+                if (longPressRef.current.timer) {
+                  clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                }
+              }}
+              onPointerLeave={() => {
+                if (longPressRef.current.timer) {
+                  clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                }
+              }}
+              onPointerCancel={() => {
+                if (longPressRef.current.timer) {
+                  clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                }
+              }}
+              onClick={() => {
+                // 长按已触发并打开了菜单，跳过本次选会话
+                if (longPressRef.current.triggered) {
+                  longPressRef.current.triggered = false
+                  return
+                }
+                if (!isRenaming) handleSelectConversation(conv.id)
+              }}
+            >
+              <MessageSquare className="size-4 shrink-0 text-muted-foreground mt-0.5" />
+              {conv.pinned && (
+                <Pin className="size-3 shrink-0 text-primary mt-1 -ml-1 absolute left-1.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                {isRenaming ? (
+                  /* 重命名输入框 */
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <Input
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleConfirmRename()
+                        if (e.key === 'Escape') handleCancelRename()
+                      }}
+                      autoFocus
+                      className="h-7 text-sm px-1.5"
+                    />
+                    <button
+                      onClick={handleConfirmRename}
+                      className="shrink-0 size-7 flex items-center justify-center rounded text-green-600 hover:bg-green-50"
+                    >
+                      <Send className="size-3.5" />
+                    </button>
+                    <button
+                      onClick={handleCancelRename}
+                      className="shrink-0 size-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-sm font-medium truncate">{conv.title}</span>
+                      {/* 三个点菜单按钮 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setMenuOpenId(isMenuOpen ? null : conv.id)
+                        }}
+                        className="shrink-0 size-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 data-[open=true]:opacity-100"
+                        data-open={isMenuOpen}
+                        aria-label="更多操作"
+                      >
+                        <MoreVertical className="size-4" />
+                      </button>
+                    </div>
+                    {conv.lastMessagePreview && (
+                      <p className="text-xs text-muted-foreground truncate mt-1">{conv.lastMessagePreview}</p>
+                    )}
+                  </>
+                )}
               </div>
-              {conv.lastMessagePreview && (
-                <p className="text-xs text-muted-foreground truncate mt-1">{conv.lastMessagePreview}</p>
+
+              {/* 下拉菜单 */}
+              {isMenuOpen && !isRenaming && (
+                <>
+                  {/* 点击外部关闭 */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={(e) => { e.stopPropagation(); setMenuOpenId(null) }}
+                  />
+                  <div
+                    className="absolute right-2 top-10 z-50 min-w-[140px] py-1 bg-popover border rounded-md shadow-md"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => handleTogglePin(conv.id, conv.pinned)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted text-left"
+                    >
+                      {conv.pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+                      {conv.pinned ? '取消置顶' : '置顶'}
+                    </button>
+                    <button
+                      onClick={() => handleStartRename(conv.id, conv.title)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted text-left"
+                    >
+                      <Pencil className="size-4" />
+                      重命名
+                    </button>
+                    <button
+                      onClick={() => handleDelete(conv.id)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-destructive/10 text-destructive text-left"
+                    >
+                      <Trash2 className="size-4" />
+                      删除
+                    </button>
+                  </div>
+                </>
               )}
             </div>
-          </div>
-        ))}
+          )
+        })}
         {filteredConversations.length === 0 && (
           <div className="px-3 py-8 text-center text-xs text-muted-foreground">
             {searchQuery.trim() ? '未找到匹配的会话' : '暂无会话，点击上方按钮创建'}
@@ -273,26 +446,26 @@ export function AgentChat() {
   )
 
   return (
-    <div className="relative h-full overflow-hidden">
-      {/* ----- 侧栏：absolute 定位，不占文档流宽度 -----
-          手机端：-translate-x-full 隐藏，translate-x-0 滑入
-          桌面端：sm:relative sm:translate-x-0 常驻左侧
-          聊天区用 translateX 同步右移，宽度不变，避免内容重排 */}
+    <div className="relative flex h-full overflow-hidden">
+      {/* ----- 侧栏 -----
+          手机端：absolute 脱离文档流做 overlay 抽屉，translate-x 滑入/滑出
+          桌面端：sm:relative 回到 flex 流，常驻左侧占 256px */}
       <aside className={`
         absolute inset-y-0 left-0 z-30 w-64 border-r bg-muted/30 flex flex-col
         transition-transform duration-300 ease-in-out
-        sm:relative sm:z-auto
+        sm:relative sm:z-auto shrink-0
         ${drawerOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'}
       `}>
         {sidebarContent}
       </aside>
 
-      {/* ----- 右侧对话区：translateX 整体平移，宽度不变 ----- */}
+      {/* ----- 右侧对话区 -----
+          手机端：flex-1 占满宽度，drawerOpen 时 translate-x-64 整体右移（宽度不变）
+          桌面端：sm:translate-x-0，作为 flex-1 子项占剩余宽度 */}
       <div className={`
-        absolute inset-0 flex flex-col
+        relative flex-1 min-h-0 flex flex-col min-w-0
         transition-transform duration-300 ease-in-out
-        sm:static sm:translate-x-0 sm:ml-0
-        ${drawerOpen ? 'translate-x-64' : 'translate-x-0'}
+        ${drawerOpen ? 'translate-x-64 sm:translate-x-0' : 'translate-x-0'}
       `}>
         {/* 手机端：抽屉打开时虚化主聊天区并屏蔽交互，点击任意空白处关闭抽屉。
             放在 chat 区内部、absolute inset-0，不会覆盖左侧 sidebar，
@@ -359,8 +532,15 @@ export function AgentChat() {
             </div>
           )}
           {asrError && (
-            <div className="mb-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-xs">
-              语音识别：{asrError}
+            <div className="mb-2 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-xs">
+              <span className="truncate">{asrError}</span>
+              <button
+                onClick={clearAsrError}
+                className="shrink-0 text-destructive/70 hover:text-destructive"
+                aria-label="关闭提示"
+              >
+                <X className="size-3.5" />
+              </button>
             </div>
           )}
           {isRecording && (

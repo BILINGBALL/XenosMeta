@@ -36,6 +36,8 @@ interface AgentState {
   createConversation: (title?: string) => Promise<string | null>
   selectConversation: (id: string) => Promise<void>
   deleteConversation: (id: string) => Promise<void>
+  renameConversation: (id: string, title: string) => Promise<void>
+  togglePin: (id: string, pinned: boolean) => Promise<void>
   fetchTools: () => Promise<void>
   sendMessage: (content: string) => Promise<void>
   clearMessages: () => void
@@ -130,6 +132,44 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }))
     } catch (e) {
       set({ error: (e as Error).message })
+    }
+  },
+
+  renameConversation: async (id: string, title: string) => {
+    try {
+      const res = await apiClient.patch<unknown, { data: AgentConversation }>(
+        `/agent/conversations/${id}`,
+        { title },
+      )
+      const updated = res.data
+      if (updated) {
+        set(state => ({
+          conversations: state.conversations.map(c =>
+            c.id === id ? { ...c, title: updated.title } : c,
+          ),
+        }))
+      }
+    } catch (e) {
+      set({ error: (e as Error).message })
+    }
+  },
+
+  togglePin: async (id: string, pinned: boolean) => {
+    // 乐观更新：立即调整本地顺序，提供即时反馈
+    set(state => ({
+      conversations: state.conversations
+        .map(c => (c.id === id ? { ...c, pinned } : c))
+        .sort((a, b) => {
+          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        }),
+    }))
+    try {
+      await apiClient.patch(`/agent/conversations/${id}`, { pinned })
+    } catch (e) {
+      // 失败时回滚
+      set({ error: (e as Error).message })
+      get().fetchConversations()
     }
   },
 

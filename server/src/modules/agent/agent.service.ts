@@ -51,7 +51,10 @@ export async function listConversations(userId: string, tenantId: string, page =
     const [rawItems, total] = await Promise.all([
         prisma.agentConversation.findMany({
             where,
-            orderBy: { updatedAt: 'desc' },
+            orderBy: [
+                { pinned: 'desc' },   // 置顶在前
+                { updatedAt: 'desc' }, // 同级别按更新时间倒序
+            ],
             skip: (page - 1) * pageSize,
             take: pageSize,
             include: {
@@ -100,6 +103,31 @@ export async function deleteConversation(conversationId: string, userId: string,
         data: { deletedAt: new Date() },
     })
     return true
+}
+
+/** 更新会话（重命名、置顶） */
+export async function updateConversation(
+    conversationId: string,
+    userId: string,
+    tenantId: string,
+    data: { title?: string; pinned?: boolean },
+) {
+    const conv = await prisma.agentConversation.findFirst({
+        where: { id: conversationId, userId, tenantId, deletedAt: null },
+    })
+    if (!conv) return null
+    const updateData: { title?: string; pinned?: boolean } = {}
+    if (typeof data.title === 'string' && data.title.trim()) {
+        updateData.title = data.title.trim().slice(0, 100)
+    }
+    if (typeof data.pinned === 'boolean') {
+        updateData.pinned = data.pinned
+    }
+    if (Object.keys(updateData).length === 0) return conv
+    return prisma.agentConversation.update({
+        where: { id: conversationId },
+        data: updateData,
+    })
 }
 
 // ==================== 消息持久化 ====================

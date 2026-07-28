@@ -61,11 +61,12 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
       return
     }
 
+    // 安全上下文 + API 可用性检查：非 HTTPS/localhost 直接禁用语音，但不影响文字输入
     if (!navigator.mediaDevices?.getUserMedia) {
-      const isSecure = window.isSecureContext
+      const isSecure = typeof window !== 'undefined' && window.isSecureContext
       setError(isSecure
         ? '当前浏览器不支持麦克风访问'
-        : '麦克风需要 HTTPS 环境才能使用。请通过 https:// 或 localhost 访问页面'
+        : '语音功能需要 HTTPS 或 localhost 环境，可继续使用文字输入'
       )
       return
     }
@@ -76,57 +77,63 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
     shouldCloseWsRef.current = false
     setIsConnecting(true)
 
+    let ws: WebSocket | null = null
     try {
       const wsUrl = `${API_BASE.replace(/^http/, 'ws')}/agent/asr?token=${encodeURIComponent(token)}`
       console.log('[ASR] Connecting to', wsUrl)
-      const ws = new WebSocket(wsUrl)
+      ws = new WebSocket(wsUrl)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
       ws.onopen = () => {
         console.log('[ASR] WebSocket opened')
-        ws.send(JSON.stringify({ type: 'start' }))
+        ws!.send(JSON.stringify({ type: 'start' }))
       }
 
       ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data)
-        console.log('[ASR] Received message:', msg.type, msg)
+        try {
+          const msg = JSON.parse(event.data)
+          console.log('[ASR] Received message:', msg.type, msg)
 
-        switch (msg.type) {
-          case 'connected':
-            setIsConnecting(false)
-            setIsRecording(true)
-            startAudioCapture()
-            break
-          case 'partial':
-            setPartialText(msg.text || '')
-            onPartialText?.(msg.text || '')
-            break
-          case 'final':
-            finalTextRef.current = msg.text || ''
-            setPartialText(msg.text || '')
-            onFinalText?.(msg.text || '')
-            break
-          case 'error':
-            console.error('[ASR] Error:', msg.message)
-            setError(msg.message || '识别错误')
-            stopRecording()
-            break
-          case 'done':
-            console.log('[ASR] Done, final text:', finalTextRef.current)
-            stopRecording()
-            if (wsRef.current) {
-              wsRef.current.close()
-              wsRef.current = null
-            }
-            break
+          switch (msg.type) {
+            case 'connected':
+              setIsConnecting(false)
+              setIsRecording(true)
+              startAudioCapture()
+              break
+            case 'partial':
+              setPartialText(msg.text || '')
+              onPartialText?.(msg.text || '')
+              break
+            case 'final':
+              finalTextRef.current = msg.text || ''
+              setPartialText(msg.text || '')
+              onFinalText?.(msg.text || '')
+              break
+            case 'error':
+              console.error('[ASR] Error:', msg.message)
+              setError(msg.message || '识别错误')
+              stopRecording()
+              break
+            case 'done':
+              console.log('[ASR] Done, final text:', finalTextRef.current)
+              stopRecording()
+              if (wsRef.current) {
+                wsRef.current.close()
+                wsRef.current = null
+              }
+              break
+          }
+        } catch (parseErr) {
+          console.error('[ASR] Message parse error:', parseErr)
         }
       }
 
       ws.onerror = (ev) => {
         console.error('[ASR] WebSocket error:', ev)
-        setError('语音识别连接失败')
+        setError('语音识别连接失败，可继续使用文字输入')
         setIsConnecting(false)
+        setIsRecording(false)
         stopRecording()
       }
 
@@ -137,8 +144,13 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
       }
     } catch (e) {
       console.error('[ASR] Exception:', e)
-      setError((e as Error).message)
+      setError('无法启动语音识别，可继续使用文字输入')
       setIsConnecting(false)
+      setIsRecording(false)
+      if (ws) {
+        try { ws.close() } catch {}
+        wsRef.current = null
+      }
     }
   }, [onFinalText, onPartialText, stopRecording])
 
@@ -175,10 +187,14 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
       }
     } catch (e) {
       console.error('[ASR] Audio capture error:', e)
-      setError('无法访问麦克风：' + (e as Error).message)
+      setError('无法访问麦克风，可继续使用文字输入')
+      setIsConnecting(false)
+      setIsRecording(false)
       stopRecording()
     }
   }
+
+  const clearError = useCallback(() => setError(null), [])
 
   useEffect(() => {
     return () => {
@@ -197,6 +213,7 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
     error,
     startRecording,
     stopRecording,
+    clearError,
     finalText: finalTextRef.current,
   }
 }
