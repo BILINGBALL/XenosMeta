@@ -99,6 +99,8 @@ function ToolEventBanner({ events }: { events: ToolEvent[] }) {
 export function AgentChat() {
   const store = useAgentStore()
   const { isLoggedIn } = useAuthStore()
+  const user = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -182,9 +184,6 @@ export function AgentChat() {
   }
 
   // 侧栏内容
-  const user = useAuthStore((s) => s.user)
-  const logout = useAuthStore((s) => s.logout)
-
   const filteredConversations = store.conversations.filter(conv => {
     if (!searchQuery.trim()) return true
     const q = searchQuery.toLowerCase()
@@ -274,22 +273,27 @@ export function AgentChat() {
   )
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* ----- 侧栏：push 抽屉 -----
-          手机端关闭时 -ml-64 将侧栏拉出视口（overflow-hidden 裁剪），
-          开启时 ml-0 让侧栏归位、主区域自然被挤右；
-          桌面端 sm:ml-0 始终可见。
-          transition-[margin] 让侧栏滑入与主区域让位同步动画。 */}
+    <div className="relative h-full overflow-hidden">
+      {/* ----- 侧栏：absolute 定位，不占文档流宽度 -----
+          手机端：-translate-x-full 隐藏，translate-x-0 滑入
+          桌面端：sm:relative sm:translate-x-0 常驻左侧
+          聊天区用 translateX 同步右移，宽度不变，避免内容重排 */}
       <aside className={`
-        w-64 shrink-0 border-r bg-muted/30 h-full flex flex-col
-        transition-[margin] duration-300 ease-in-out
-        ${drawerOpen ? 'ml-0' : '-ml-64 sm:ml-0'}
+        absolute inset-y-0 left-0 z-30 w-64 border-r bg-muted/30 flex flex-col
+        transition-transform duration-300 ease-in-out
+        sm:relative sm:z-auto
+        ${drawerOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'}
       `}>
         {sidebarContent}
       </aside>
 
-      {/* ----- 右侧对话区 ----- */}
-      <div className="relative flex-1 min-h-0 flex flex-col min-w-0">
+      {/* ----- 右侧对话区：translateX 整体平移，宽度不变 ----- */}
+      <div className={`
+        absolute inset-0 flex flex-col
+        transition-transform duration-300 ease-in-out
+        sm:static sm:translate-x-0 sm:ml-0
+        ${drawerOpen ? 'translate-x-64' : 'translate-x-0'}
+      `}>
         {/* 手机端：抽屉打开时虚化主聊天区并屏蔽交互，点击任意空白处关闭抽屉。
             放在 chat 区内部、absolute inset-0，不会覆盖左侧 sidebar，
             因此点击 sidebar 内的会话仍可正常切换。 */}
