@@ -166,7 +166,7 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
       const source = audioContext.createMediaStreamSource(stream)
       sourceRef.current = source
 
-      const processor = audioContext.createScriptProcessor(4096, 1, 1)
+      const processor = audioContext.createScriptProcessor(2048, 1, 1)
       scriptProcessorRef.current = processor
 
       source.connect(processor)
