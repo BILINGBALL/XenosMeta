@@ -50,7 +50,7 @@ interface AgentState {
  */
 async function cleanupEmptyConversation(
   get: () => AgentState,
-  set: (fn: (state: AgentState) => Partial<AgentState>) => void,
+  set: (partial: Partial<AgentState>) => void,
 ) {
   const { currentConversationId, messages, conversations } = get()
   if (!currentConversationId || messages.length > 0) return
