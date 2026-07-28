@@ -71,6 +71,17 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
       return
     }
 
+    // 先请求麦克风权限：权限弹窗在 ws 连接前出现，避免打断后续按住说话交互
+    // 也避免第一次权限授权后残留状态串入第二次录音，触发服务端"识别未就绪"
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch (e) {
+      console.error('[ASR] Mic permission denied:', e)
+      setError('无法访问麦克风，可继续使用文字输入')
+      return
+    }
+
     setError(null)
     setPartialText('')
     finalTextRef.current = ''
@@ -99,7 +110,7 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
             case 'connected':
               setIsConnecting(false)
               setIsRecording(true)
-              startAudioCapture()
+              startAudioCapture(stream)
               break
             case 'partial':
               setPartialText(msg.text || '')
@@ -154,10 +165,9 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
     }
   }, [onFinalText, onPartialText, stopRecording])
 
-  const startAudioCapture = async () => {
+  const startAudioCapture = async (stream: MediaStream) => {
     try {
       console.log('[ASR] Starting audio capture...')
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
       const audioContext = new AudioContext({ sampleRate: 16000 })
@@ -176,6 +186,8 @@ export function useSpeechRecognition({ onFinalText, onPartialText }: UseSpeechRe
       let frameCount = 0
 
       processor.onaudioprocess = (e) => {
+        // stream 已停止（stopRecording 清理后），丢弃已排队的回调
+        if (!streamRef.current) return
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
         const inputData = e.inputBuffer.getChannelData(0)
         const buffer = floatTo16BitPCM(inputData)
