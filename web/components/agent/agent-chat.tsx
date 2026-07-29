@@ -101,6 +101,9 @@ export function AgentChat() {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null) // 当前打开菜单的会话 id
   const [renamingId, setRenamingId] = useState<string | null>(null)  // 当前重命名的会话 id
   const [renameValue, setRenameValue] = useState('')
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const [chatSearchOpen, setChatSearchOpen] = useState(false)
+  const [chatSearchQuery, setChatSearchQuery] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   // 长按检测：500ms 触发，pointerup/leave/cancel 清除；触发后阻止本次 click 选会话
   const longPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; triggered: boolean; startX?: number; startY?: number }>({ timer: null, triggered: false })
@@ -487,7 +490,7 @@ export function AgentChat() {
           />
         )}
         {/* 顶部条 — 手机端：汉堡 + 当前会话标题 */}
-        <div className="sm:hidden h-14 flex items-center gap-1 px-3 border-b shrink-0">
+        <div className="sm:hidden h-16 flex items-center gap-1 px-3 border-b shrink-0 relative">
           <Button
             variant="ghost"
             size="icon"
@@ -499,18 +502,95 @@ export function AgentChat() {
           </Button>
           <button
             type="button"
-            className="text-sm font-medium truncate flex-1 mr-2 text-left"
-            onClick={() => {
-              const conv = store.conversations.find(c => c.id === store.currentConversationId)
-              if (conv) {
-                setDrawerOpen(true)
-                setTimeout(() => setMenuOpenId(conv.id), 350)
-              }
-            }}
+            className="flex flex-col items-center justify-center flex-1 mr-2 min-w-0 py-1 group"
+            onClick={() => setHeaderMenuOpen(true)}
           >
-            {store.conversations.find(c => c.id === store.currentConversationId)?.title || 'AI Agent'}
+            <div className="flex items-center gap-1 max-w-full">
+              <span className="text-sm font-bold truncate text-center">
+                {(() => {
+                  const t = store.conversations.find(c => c.id === store.currentConversationId)?.title || 'AI Agent'
+                  return t.length > 15 ? t.slice(0, 15) + '…' : t
+                })()}
+              </span>
+              <ChevronDown className="size-3 shrink-0 text-muted-foreground group-hover:translate-y-0.5 transition-transform" />
+            </div>
+            <div className="text-[10px] text-muted-foreground truncate">🤖AI有时也会犯错 请记得审核哦</div>
           </button>
+
+          {/* 标题下拉菜单 */}
+          {headerMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setHeaderMenuOpen(false)}
+              />
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 w-52 bg-popover rounded-lg border shadow-lg z-50 py-1 overflow-hidden">
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-muted transition-colors"
+                  onClick={() => { setHeaderMenuOpen(false); store.createConversation() }}
+                >
+                  <Plus className="size-4 text-muted-foreground" />
+                  创建新对话
+                </button>
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-muted transition-colors"
+                  onClick={() => {
+                    setHeaderMenuOpen(false)
+                    const conv = store.conversations.find(c => c.id === store.currentConversationId)
+                    if (conv) handleStartRename(conv.id, conv.title)
+                  }}
+                >
+                  <Pencil className="size-4 text-muted-foreground" />
+                  修改对话标题
+                </button>
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-muted transition-colors"
+                  onClick={() => { setHeaderMenuOpen(false); setChatSearchOpen(true); setChatSearchQuery('') }}
+                >
+                  <Search className="size-4 text-muted-foreground" />
+                  查找聊天内容
+                </button>
+                <div className="h-px bg-border mx-2" />
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-destructive hover:bg-destructive/5 transition-colors"
+                  onClick={() => {
+                    setHeaderMenuOpen(false)
+                    const id = store.currentConversationId
+                    if (id) store.deleteConversation(id)
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                  从对话列表删除
+                </button>
+              </div>
+            </>
+          )}
         </div>
+
+        {/* 聊天内容搜索框 */}
+        {chatSearchOpen && (
+          <div className="shrink-0 border-b px-3 py-2 flex items-center gap-2 bg-muted/30">
+            <Search className="size-4 text-muted-foreground shrink-0" />
+            <Input
+              value={chatSearchQuery}
+              onChange={(e) => setChatSearchQuery(e.target.value)}
+              placeholder="搜索聊天内容..."
+              className="h-8 text-sm flex-1"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={() => { setChatSearchOpen(false); setChatSearchQuery('') }}
+              className="shrink-0 size-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
 
         {/* 消息列表 */}
         <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto overscroll-contain px-4 py-6 space-y-6">
@@ -521,15 +601,27 @@ export function AgentChat() {
               <p className="text-sm">开始一个新的对话，我可以帮你查询数据、管理文件和执行操作</p>
             </div>
           ) : (
-            store.messages.map((msg, idx) => (
-              <MessageBubble
-                key={msg.id}
-                msg={msg}
-                streaming={store.streaming && idx === store.messages.length - 1}
-                fontSizePx={fontSizePx}
-                autoExpandTools={autoExpandTools}
-              />
-            ))
+            (() => {
+              const filtered = chatSearchQuery.trim()
+                ? store.messages.filter(m => m.content?.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+                : store.messages
+              return filtered.length === 0 && chatSearchQuery.trim() ? (
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                  <Search className="size-10 mb-3 opacity-20" />
+                  <p className="text-sm">未找到包含「{chatSearchQuery}」的消息</p>
+                </div>
+              ) : (
+                filtered.map((msg, idx) => (
+                  <MessageBubble
+                    key={msg.id}
+                    msg={msg}
+                    streaming={store.streaming && !chatSearchQuery.trim() && idx === store.messages.length - 1}
+                    fontSizePx={fontSizePx}
+                    autoExpandTools={autoExpandTools}
+                  />
+                ))
+              )
+            })()
           )}
           {store.loading && (
             <div className="flex items-center justify-center py-8">
