@@ -534,13 +534,13 @@ export function AgentChat() {
             onClick={() => setHeaderMenuOpen(true)}
           >
             <div className="flex items-center gap-1 max-w-full">
-              <span className="text-sm font-bold truncate text-center">
+              <span className="text-base font-bold truncate text-center">
                 {(() => {
                   const t = store.conversations.find(c => c.id === store.currentConversationId)?.title || 'AI Agent'
-                  return t.length > 15 ? t.slice(0, 15) + '…' : t
+                  return t.length > 12 ? t.slice(0, 12) + '…' : t
                 })()}
               </span>
-              <ChevronDown className="size-3 shrink-0 text-muted-foreground group-hover:translate-y-0.5 transition-transform" />
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground group-hover:translate-y-0.5 transition-transform" />
             </div>
             <div className="text-[11px] text-muted-foreground truncate mt-0.5">AI有时也会犯错 记得审核哦</div>
           </button>

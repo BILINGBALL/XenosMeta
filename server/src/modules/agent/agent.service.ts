@@ -13,7 +13,7 @@ import type { AgentContext, ChatMessage, SSEEvent, SSEEventData } from '@modules
 const TITLE_PROMPT = `你是对话标题生成助手。请根据用户的第一条消息，生成一个简洁、准确的对话标题。
 
 要求：
-1. 标题长度不超过15个字符（中文）
+1. 标题长度不超过12个字符（中文）
 2. 不要包含标点符号
 3. 直接输出标题，不要有任何解释
 4. 如果消息是问题，保留核心关键词
@@ -59,7 +59,7 @@ async function generateConversationTitle(conversationId: string, userMessage: st
             .replace(/^["'""']|["'""']$/g, '')
             .replace(/\n/g, '')
             .replace(/[，。！？.,!?;；]/g, '')
-            .slice(0, 15)
+            .slice(0, 12)
 
         if (cleanTitle) {
             await prisma.agentConversation.update({
@@ -286,7 +286,7 @@ export async function executeChat(
         })
         if (userMsgCount === 1) {
             // 先设置一个临时标题（首句截取），避免侧边栏显示"新对话"
-            const tempTitle = userMessage.trim().slice(0, 20) + (userMessage.trim().length > 20 ? '…' : '')
+            const tempTitle = userMessage.trim().slice(0, 12) + (userMessage.trim().length > 12 ? '…' : '')
             await prisma.agentConversation.update({
                 where: { id: conversationId },
                 data: { title: tempTitle || '新对话' },
