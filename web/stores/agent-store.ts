@@ -163,11 +163,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   deleteConversation: async (id: string) => {
     try {
       await apiClient.delete(`/agent/conversations/${id}`)
+      const wasCurrent = get().currentConversationId === id
       set(state => ({
         conversations: state.conversations.filter(c => c.id !== id),
         currentConversationId: state.currentConversationId === id ? null : state.currentConversationId,
         messages: state.currentConversationId === id ? [] : state.messages,
       }))
+      // 若删除的是当前对话，自动创建新对话避免显示空状态
+      if (wasCurrent) {
+        await get().createConversation()
+      }
     } catch (e) {
       set({ error: (e as Error).message })
     }

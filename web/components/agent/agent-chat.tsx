@@ -16,7 +16,33 @@ import type { ChatDisplayMessage, ToolEvent } from '@/types'
 
 // ==================== 消息气泡 ====================
 
-function MessageBubble({ msg, streaming, fontSizePx, autoExpandTools }: { msg: ChatDisplayMessage; streaming: boolean; fontSizePx: number; autoExpandTools: boolean }) {
+/** 将文本中匹配关键词的部分用高亮标记包裹 */
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query.trim()) return text
+  const lowerQuery = query.toLowerCase()
+  const lowerText = text.toLowerCase()
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let index = lowerText.indexOf(lowerQuery)
+  while (index !== -1) {
+    if (index > lastIndex) {
+      parts.push(text.slice(lastIndex, index))
+    }
+    parts.push(
+      <mark key={index} className="bg-yellow-300 text-black rounded-sm px-0.5">
+        {text.slice(index, index + query.length)}
+      </mark>
+    )
+    lastIndex = index + query.length
+    index = lowerText.indexOf(lowerQuery, lastIndex)
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+  return parts
+}
+
+function MessageBubble({ msg, streaming, fontSizePx, autoExpandTools, searchQuery }: { msg: ChatDisplayMessage; streaming: boolean; fontSizePx: number; autoExpandTools: boolean; searchQuery?: string }) {
   const isUser = msg.role === 'user'
 
   return (
@@ -33,7 +59,9 @@ function MessageBubble({ msg, streaming, fontSizePx, autoExpandTools }: { msg: C
             ? 'bg-primary text-primary-foreground max-w-full'
             : 'bg-muted text-foreground w-full'
         }`} style={{ fontSize: fontSizePx }}>
-          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+          <div className="whitespace-pre-wrap break-words">
+            {searchQuery?.trim() ? highlightText(msg.content, searchQuery) : msg.content}
+          </div>
         </div>
       ) : !isUser && streaming ? (
         <div className="flex items-center gap-1.5 text-muted-foreground px-2 py-2" style={{ fontSize: fontSizePx }}>
@@ -514,7 +542,7 @@ export function AgentChat() {
               </span>
               <ChevronDown className="size-3 shrink-0 text-muted-foreground group-hover:translate-y-0.5 transition-transform" />
             </div>
-            <div className="text-[10px] text-muted-foreground truncate">🤖AI有时也会犯错 请记得审核哦</div>
+            <div className="text-[11px] text-muted-foreground truncate mt-0.5">AI有时也会犯错 记得审核哦</div>
           </button>
 
           {/* 标题下拉菜单 */}
@@ -618,6 +646,7 @@ export function AgentChat() {
                     streaming={store.streaming && !chatSearchQuery.trim() && idx === store.messages.length - 1}
                     fontSizePx={fontSizePx}
                     autoExpandTools={autoExpandTools}
+                    searchQuery={chatSearchQuery.trim() || undefined}
                   />
                 ))
               )
