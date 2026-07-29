@@ -254,7 +254,7 @@ export function AgentChat() {
       </div>
 
       {/* 中间：会话列表（可滚动） */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-auto overscroll-contain">
         <div className="px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           历史对话
         </div>
@@ -455,7 +455,7 @@ export function AgentChat() {
   )
 
   return (
-    <div className="relative flex h-full overflow-hidden">
+    <div className="relative flex h-full overflow-hidden overscroll-contain">
       {/* ----- 侧栏 -----
           手机端：absolute 脱离文档流做 overlay 抽屉，translate-x 滑入/滑出
           桌面端：sm:relative 回到 flex 流，常驻左侧占 320px */}
@@ -497,13 +497,23 @@ export function AgentChat() {
           >
             <Menu className="size-5" />
           </Button>
-          <span className="text-lg font-semibold truncate flex-1 mr-2">
+          <button
+            type="button"
+            className="text-sm font-medium truncate flex-1 mr-2 text-left"
+            onClick={() => {
+              const conv = store.conversations.find(c => c.id === store.currentConversationId)
+              if (conv) {
+                setDrawerOpen(true)
+                setTimeout(() => setMenuOpenId(conv.id), 350)
+              }
+            }}
+          >
             {store.conversations.find(c => c.id === store.currentConversationId)?.title || 'AI Agent'}
-          </span>
+          </button>
         </div>
 
         {/* 消息列表 */}
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto px-4 py-6 space-y-6">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto overscroll-contain px-4 py-6 space-y-6">
           {store.messages.length === 0 && !store.loading ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <Bot className="size-16 mb-4 opacity-20" />

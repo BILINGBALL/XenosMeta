@@ -32,6 +32,7 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [pageHeights, setPageHeights] = useState<number[]>([])
+  const [pageWidths, setPageWidths] = useState<number[]>([])
 
   // ===== Load PDF + fetch all page sizes =====
   useEffect(() => {
@@ -75,24 +76,27 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
     return () => { cancelled = true }
   }, [url])
 
-  // ===== Compute page heights at a given zoom =====
-  const computeHeights = useCallback((z: number) => {
+  // ===== Compute page widths and heights at a given zoom =====
+  const computeDimensions = useCallback((z: number) => {
     const viewer = viewerRef.current
-    if (!viewer || pageSizesRef.current.length === 0) return []
+    if (!viewer || pageSizesRef.current.length === 0) return { heights: [], widths: [] }
     const cw = viewer.clientWidth - PAGE_GAP
-    return pageSizesRef.current.map(s => s.h * (cw / s.w) * z + PAGE_GAP)
+    const heights = pageSizesRef.current.map(s => s.h * (cw / s.w) * z + PAGE_GAP)
+    const widths = pageSizesRef.current.map(s => s.w * (cw / s.w) * z)
+    return { heights, widths }
   }, [])
 
-  // ===== Update heights + page tops when zoom changes or PDF loads =====
+  // ===== Update heights + widths + page tops when zoom changes or PDF loads =====
   useEffect(() => {
     if (pageSizesRef.current.length === 0) return
-    const heights = computeHeights(zoom)
+    const { heights, widths } = computeDimensions(zoom)
     setPageHeights(heights)
+    setPageWidths(widths)
     const tops: number[] = []
     let y = 0
     for (const h of heights) { tops.push(y); y += h }
     pageTopsRef.current = tops
-  }, [zoom, computeHeights, loading])
+  }, [zoom, computeDimensions, loading])
 
   // ===== After heights update: restore scroll + render visible =====
   useEffect(() => {
@@ -141,7 +145,7 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
       canvas.style.width = `${viewport.width}px`
       canvas.style.height = `${viewport.height}px`
       canvas.style.display = 'block'
-      canvas.style.margin = `0 auto ${PAGE_GAP}px`
+      canvas.style.margin = `${PAGE_GAP}px 0 0 0`
 
       const ctx = canvas.getContext('2d')!
       ctx.scale(dpr, dpr)
@@ -276,8 +280,9 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
         }
         canvasByPageRef.current.clear()
         if (viewer) viewer.querySelectorAll('[data-pdf-ph]').forEach(el => { (el as HTMLElement).innerHTML = '' })
-        const heights = computeHeights(zoom)
+        const { heights, widths } = computeDimensions(zoom)
         setPageHeights(heights)
+        setPageWidths(widths)
         const tops: number[] = []
         let y = 0
         for (const h of heights) { tops.push(y); y += h }
@@ -286,7 +291,7 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
     }
     window.addEventListener('resize', onResize)
     return () => { window.removeEventListener('resize', onResize); cancelAnimationFrame(raf) }
-  }, [zoom, pageHeights, computeHeights])
+  }, [zoom, pageHeights, computeDimensions])
 
   // ===== Scroll to page =====
   const scrollToPage = useCallback((n: number) => {
@@ -396,8 +401,8 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
           <div
             key={i}
             data-pdf-ph={i + 1}
-            style={{ height: `${h}px` }}
-            className="flex items-start justify-center"
+            style={{ height: `${h}px`, width: pageWidths[i] ? `${pageWidths[i]}px` : undefined }}
+            className="flex items-start"
           />
         ))}
       </div>

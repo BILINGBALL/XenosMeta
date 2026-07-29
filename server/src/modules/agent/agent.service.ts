@@ -8,6 +8,71 @@ import { agentConfig, buildRateLimitKey } from '@modules/agent/agent.config'
 import { runAgentLoop } from '@modules/agent/agent.scheduler'
 import type { AgentContext, ChatMessage, SSEEvent, SSEEventData } from '@modules/agent/agent.types'
 
+// ==================== AI 标题生成 ====================
+
+const TITLE_PROMPT = `你是对话标题生成助手。请根据用户的第一条消息，生成一个简洁、准确的对话标题。
+
+要求：
+1. 标题长度不超过15个字符（中文）
+2. 不要包含标点符号
+3. 直接输出标题，不要有任何解释
+4. 如果消息是问题，保留核心关键词
+5. 如果消息是操作请求，概括操作内容
+
+用户消息：`
+
+/**
+ * 调用 LLM 生成对话标题
+ * 异步 fire-and-forget，不阻塞主对话流程
+ */
+async function generateConversationTitle(conversationId: string, userMessage: string): Promise<void> {
+    try {
+        const url = `${agentConfig.apiBase}/chat/completions`
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${agentConfig.apiKey}`,
+            },
+            body: JSON.stringify({
+                model: agentConfig.model,
+                messages: [
+                    { role: 'system', content: '你是一个对话标题生成助手，只输出标题文本，不输出任何解释。' },
+                    { role: 'user', content: `${TITLE_PROMPT}${userMessage}` },
+                ],
+                temperature: 0.3,
+                max_tokens: 30,
+            }),
+        })
+
+        if (!res.ok) {
+            logger.warn({ status: res.status, conversationId }, '标题生成 LLM 请求失败')
+            return
+        }
+
+        const json = await res.json() as any
+        const title = json.choices?.[0]?.message?.content?.trim()
+        if (!title) return
+
+        // 清理标题：去除引号、换行，截断到15字
+        const cleanTitle = title
+            .replace(/^["'""']|["'""']$/g, '')
+            .replace(/\n/g, '')
+            .replace(/[，。！？.,!?;；]/g, '')
+            .slice(0, 15)
+
+        if (cleanTitle) {
+            await prisma.agentConversation.update({
+                where: { id: conversationId },
+                data: { title: cleanTitle },
+            })
+            logger.debug({ conversationId, title: cleanTitle }, 'AI 生成对话标题')
+        }
+    } catch (err) {
+        logger.warn({ err: (err as Error).message, conversationId }, '标题生成失败，保留默认标题')
+    }
+}
+
 // ==================== 限流 ====================
 
 /**
@@ -215,17 +280,19 @@ export async function executeChat(
         // 1. 保存用户消息
         await saveUserMessage(conversationId, userMessage)
 
-        // 1.5. 首次对话时自动用用户首句设置标题，方便侧边栏识别
+        // 1.5. 首次对话时调用 AI 生成简短标题，方便侧边栏识别
         const userMsgCount = await prisma.agentMessage.count({
             where: { conversationId, role: 'user' },
         })
         if (userMsgCount === 1) {
-            const trimmed = userMessage.trim()
-            const newTitle = trimmed.slice(0, 30) + (trimmed.length > 30 ? '…' : '')
+            // 先设置一个临时标题（首句截取），避免侧边栏显示"新对话"
+            const tempTitle = userMessage.trim().slice(0, 20) + (userMessage.trim().length > 20 ? '…' : '')
             await prisma.agentConversation.update({
                 where: { id: conversationId },
-                data: { title: newTitle },
+                data: { title: tempTitle || '新对话' },
             })
+            // 异步调用 AI 生成更优标题（不阻塞 SSE 流）
+            generateConversationTitle(conversationId, userMessage.trim())
         }
 
         // 2. 加载历史消息（最近 20 条，防止 token 爆炸）

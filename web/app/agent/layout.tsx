@@ -8,7 +8,7 @@ export default function AgentLayout({ children }: { children: React.ReactNode })
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-background">
+    <div className="fixed inset-0 flex flex-col bg-background overscroll-contain">
       {/* 桌面端顶部栏；手机端由 AgentChat 自带汉堡头处理 */}
       <header className="hidden sm:flex shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex h-14 items-center justify-between px-6 w-full">
@@ -35,7 +35,7 @@ export default function AgentLayout({ children }: { children: React.ReactNode })
           </div>
         </div>
       </header>
-      <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
+      <main className="flex-1 min-h-0 overflow-hidden overscroll-contain">{children}</main>
     </div>
   )
 }
