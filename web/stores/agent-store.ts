@@ -132,6 +132,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   selectConversation: async (id: string) => {
+    // 点击的是当前会话，无需切换
+    if (get().currentConversationId === id) return
+
     // 切换前若当前会话为空会话（无消息），先删除避免堆积无用记录
     await cleanupEmptyConversation(get, set)
 
