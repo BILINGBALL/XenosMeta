@@ -7,56 +7,48 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu, ArrowLeft, Search, UserCog, LogOut, MoreVertical, Pin, PinOff, Pencil } from 'lucide-react'
+import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu, ArrowLeft, Search, UserCog, LogOut, MoreVertical, Pin, PinOff, Pencil, Settings } from 'lucide-react'
 import Link from 'next/link'
 import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
+import { useSettingsStore, FONT_SIZE_PX } from '@/stores/settings-store'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import type { ChatDisplayMessage, ToolEvent } from '@/types'
 
 // ==================== 消息气泡 ====================
 
-function MessageBubble({ msg, streaming }: { msg: ChatDisplayMessage; streaming: boolean }) {
+function MessageBubble({ msg, streaming, fontSizePx, autoExpandTools }: { msg: ChatDisplayMessage; streaming: boolean; fontSizePx: number; autoExpandTools: boolean }) {
   const isUser = msg.role === 'user'
 
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
-      {/* 头像 */}
-      <div className={`shrink-0 size-8 rounded-full flex items-center justify-center ${
-        isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-      }`}>
-        {isUser ? <User className="size-4" /> : <Bot className="size-4" />}
-      </div>
+    <div className={`flex flex-col gap-2 ${isUser ? 'items-end pl-10' : 'items-start'}`}>
+      {/* 工具调用概览 — 收起时只显示一行精简信息 */}
+      {msg.toolEvents && msg.toolEvents.length > 0 && (
+        <ToolEventBanner events={msg.toolEvents} defaultOpen={autoExpandTools} />
+      )}
 
-      {/* 消息内容 */}
-      <div className={`flex-1 min-w-0 ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-2`}>
-        {/* 工具调用概览 — 收起时只显示一行精简信息 */}
-        {msg.toolEvents && msg.toolEvents.length > 0 && (
-          <ToolEventBanner events={msg.toolEvents} />
-        )}
-
-        {/* 文本内容 */}
-        {msg.content ? (
-          <div className={`rounded-lg px-3.5 py-2.5 text-sm leading-relaxed max-w-[85%] ${
-            isUser
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-muted text-foreground'
-          }`}>
-            <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-          </div>
-        ) : !isUser && streaming ? (
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground px-2 py-2">
-            <Loader2 className="size-3.5 animate-spin" />
-            <span>思考中...</span>
-          </div>
-        ) : null}
-      </div>
+      {/* 文本内容 */}
+      {msg.content ? (
+        <div className={`rounded-lg px-3.5 py-2.5 leading-relaxed ${
+          isUser
+            ? 'bg-primary text-primary-foreground max-w-full'
+            : 'bg-muted text-foreground w-full'
+        }`} style={{ fontSize: fontSizePx }}>
+          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+        </div>
+      ) : !isUser && streaming ? (
+        <div className="flex items-center gap-1.5 text-muted-foreground px-2 py-2" style={{ fontSize: fontSizePx }}>
+          <Loader2 className="size-3.5 animate-spin" />
+          <span>思考中...</span>
+        </div>
+      ) : null}
     </div>
   )
 }
 
 // ==================== 工具调用精简概览 ====================
 
-function ToolEventBanner({ events }: { events: ToolEvent[] }) {
-  const [open, setOpen] = useState(false)
+function ToolEventBanner({ events, defaultOpen }: { events: ToolEvent[]; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
 
   if (events.length === 0) return null
 
@@ -101,9 +93,12 @@ export function AgentChat() {
   const { isLoggedIn } = useAuthStore()
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
+  const { fontSize, enterToSend, autoExpandTools } = useSettingsStore()
+  const fontSizePx = FONT_SIZE_PX[fontSize]
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null) // 当前打开菜单的会话 id
   const [renamingId, setRenamingId] = useState<string | null>(null)  // 当前重命名的会话 id
   const [renameValue, setRenameValue] = useState('')
@@ -152,11 +147,18 @@ export function AgentChat() {
   }, [input, store.streaming, isRecording, stopRecording])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+    // enterToSend 开启：Enter 发送，Shift+Enter 换行
+    // enterToSend 关闭：Ctrl/Cmd+Enter 发送，Enter 换行
+    if (e.key === 'Enter') {
+      if (enterToSend && !e.shiftKey) {
+        e.preventDefault()
+        handleSend()
+      } else if (!enterToSend && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        handleSend()
+      }
     }
-  }, [handleSend])
+  }, [handleSend, enterToSend])
 
   // 按住说话
   const handleVoiceStart = (e: React.PointerEvent) => {
@@ -433,6 +435,14 @@ export function AgentChat() {
             </div>
           </div>
           <button
+            onClick={() => setSettingsOpen(true)}
+            className="shrink-0 size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="设置"
+            aria-label="设置"
+          >
+            <Settings className="size-4" />
+          </button>
+          <button
             onClick={() => logout()}
             className="shrink-0 size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
             title="退出登录"
@@ -448,9 +458,9 @@ export function AgentChat() {
     <div className="relative flex h-full overflow-hidden">
       {/* ----- 侧栏 -----
           手机端：absolute 脱离文档流做 overlay 抽屉，translate-x 滑入/滑出
-          桌面端：sm:relative 回到 flex 流，常驻左侧占 256px */}
+          桌面端：sm:relative 回到 flex 流，常驻左侧占 320px */}
       <aside className={`
-        absolute inset-y-0 left-0 z-30 w-64 border-r bg-muted/30 flex flex-col
+        absolute inset-y-0 left-0 z-30 w-80 border-r bg-muted/30 flex flex-col
         transition-transform duration-300 ease-in-out
         sm:relative sm:z-auto shrink-0
         ${drawerOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'}
@@ -459,12 +469,12 @@ export function AgentChat() {
       </aside>
 
       {/* ----- 右侧对话区 -----
-          手机端：flex-1 占满宽度，drawerOpen 时 translate-x-64 整体右移（宽度不变）
+          手机端：flex-1 占满宽度，drawerOpen 时 translate-x-80 整体右移（宽度不变）
           桌面端：sm:translate-x-0，作为 flex-1 子项占剩余宽度 */}
       <div className={`
         relative flex-1 min-h-0 flex flex-col min-w-0
         transition-transform duration-300 ease-in-out
-        ${drawerOpen ? 'translate-x-64 sm:translate-x-0' : 'translate-x-0'}
+        ${drawerOpen ? 'translate-x-80 sm:translate-x-0' : 'translate-x-0'}
       `}>
         {/* 手机端：抽屉打开时虚化主聊天区并屏蔽交互，点击任意空白处关闭抽屉。
             放在 chat 区内部、absolute inset-0，不会覆盖左侧 sidebar，
@@ -513,6 +523,8 @@ export function AgentChat() {
                 key={msg.id}
                 msg={msg}
                 streaming={store.streaming && idx === store.messages.length - 1}
+                fontSizePx={fontSizePx}
+                autoExpandTools={autoExpandTools}
               />
             ))
           )}
@@ -564,7 +576,7 @@ export function AgentChat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isRecording ? '请开始说话...' : '输入消息，或按住麦克风说话'}
+              placeholder={isRecording ? '请开始说话...' : enterToSend ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入消息，Ctrl+Enter 发送'}
               className={`flex-1 min-h-[44px] max-h-32 resize-none transition-colors ${isRecording ? 'border-red-500 bg-red-50/30' : ''}`}
               rows={1}
               disabled={store.streaming}
@@ -604,6 +616,116 @@ export function AgentChat() {
           )}
         </div>
       </div>
+
+      {/* 设置弹窗 */}
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
+  )
+}
+
+// ==================== 设置面板 ====================
+
+function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { fontSize, enterToSend, autoExpandTools, setFontSize, setEnterToSend, setAutoExpandTools, reset } = useSettingsStore()
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <div className="flex items-center gap-2 pb-2">
+          <Settings className="size-4" />
+          <h2 className="text-base font-semibold">设置</h2>
+        </div>
+
+        <div className="space-y-5 max-h-[60vh] overflow-auto pr-1">
+          {/* 字体大小 */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">消息字体大小</label>
+              <span className="text-xs text-muted-foreground">{FONT_SIZE_PX[fontSize]}px</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {(['sm', 'md', 'lg'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setFontSize(s)}
+                  className={`h-9 rounded-md border text-sm transition-colors ${
+                    fontSize === s
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border hover:bg-muted'
+                  }`}
+                >
+                  {s === 'sm' ? '小' : s === 'md' ? '中' : '大'}
+                </button>
+              ))}
+            </div>
+            {/* 预览 */}
+            <div className="rounded-md bg-muted/50 p-2.5">
+              <div className="rounded bg-background px-3 py-2" style={{ fontSize: FONT_SIZE_PX[fontSize] }}>
+                预览：AI 助手回复内容示例
+              </div>
+            </div>
+          </div>
+
+          {/* 回车发送 */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">回车发送消息</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {enterToSend ? 'Enter 发送，Shift+Enter 换行' : 'Ctrl/Cmd+Enter 发送，Enter 换行'}
+              </div>
+            </div>
+            <button
+              onClick={() => setEnterToSend(!enterToSend)}
+              role="switch"
+              aria-checked={enterToSend}
+              className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${
+                enterToSend ? 'bg-primary' : 'bg-muted-foreground/30'
+              }`}
+            >
+              <span className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-background shadow transition-transform ${
+                enterToSend ? 'translate-x-5' : 'translate-x-0'
+              }`} />
+            </button>
+          </div>
+
+          {/* 工具调用默认展开 */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">工具调用详情默认展开</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                关闭时点击图标手动展开
+              </div>
+            </div>
+            <button
+              onClick={() => setAutoExpandTools(!autoExpandTools)}
+              role="switch"
+              aria-checked={autoExpandTools}
+              className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${
+                autoExpandTools ? 'bg-primary' : 'bg-muted-foreground/30'
+              }`}
+            >
+              <span className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-background shadow transition-transform ${
+                autoExpandTools ? 'translate-x-5' : 'translate-x-0'
+              }`} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex justify-between pt-2 border-t">
+          <button
+            onClick={() => reset()}
+            className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+          >
+            恢复默认
+          </button>
+          <button
+            onClick={() => onOpenChange(false)}
+            className="text-sm text-primary hover:underline"
+          >
+            完成
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
