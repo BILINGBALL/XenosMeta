@@ -92,14 +92,12 @@ export function AgentChat() {
   const store = useAgentStore()
   const { isLoggedIn } = useAuthStore()
   const user = useAuthStore((s) => s.user)
-  const logout = useAuthStore((s) => s.logout)
   const { fontSize, enterToSend, autoExpandTools } = useSettingsStore()
   const fontSizePx = FONT_SIZE_PX[fontSize]
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null) // 当前打开菜单的会话 id
   const [renamingId, setRenamingId] = useState<string | null>(null)  // 当前重命名的会话 id
   const [renameValue, setRenameValue] = useState('')
@@ -451,14 +449,6 @@ export function AgentChat() {
           >
             <Settings className="size-4" />
           </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setLogoutConfirmOpen(true) }}
-            className="shrink-0 size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
-            title="退出登录"
-            type="button"
-          >
-            <LogOut className="size-4" />
-          </button>
         </div>
       </div>
     </>
@@ -620,11 +610,8 @@ export function AgentChat() {
         </div>
       </div>
 
-      {/* 设置弹窗 */}
+      {/* 设置弹窗（含退出登录入口） */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-
-      {/* 退出登录确认弹窗 */}
-      <LogoutConfirmDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen} />
     </div>
   )
 }
@@ -633,6 +620,18 @@ export function AgentChat() {
 
 function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { fontSize, enterToSend, autoExpandTools, setFontSize, setEnterToSend, setAutoExpandTools, reset } = useSettingsStore()
+  const logout = useAuthStore((s) => s.logout)
+  const [confirmLogout, setConfirmLogout] = useState(false)
+
+  // Dialog 关闭时重置内部确认状态
+  useEffect(() => {
+    if (!open) setConfirmLogout(false)
+  }, [open])
+
+  const handleLogout = () => {
+    onOpenChange(false)
+    logout()
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -653,6 +652,7 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
               {(['sm', 'md', 'lg'] as const).map(s => (
                 <button
                   key={s}
+                  type="button"
                   onClick={() => setFontSize(s)}
                   className={`h-9 rounded-md border text-sm transition-colors ${
                     fontSize === s
@@ -681,6 +681,7 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
               </div>
             </div>
             <button
+              type="button"
               onClick={() => setEnterToSend(!enterToSend)}
               role="switch"
               aria-checked={enterToSend}
@@ -703,6 +704,7 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
               </div>
             </div>
             <button
+              type="button"
               onClick={() => setAutoExpandTools(!autoExpandTools)}
               role="switch"
               aria-checked={autoExpandTools}
@@ -715,62 +717,66 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
               }`} />
             </button>
           </div>
+
+          {/* 账号操作分区 */}
+          <div className="pt-3 border-t space-y-2">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">账号</div>
+            {!confirmLogout ? (
+              <button
+                type="button"
+                onClick={() => setConfirmLogout(true)}
+                className="w-full h-10 rounded-md border border-destructive/30 text-destructive hover:bg-destructive/5 transition-colors text-sm font-medium flex items-center justify-center gap-2"
+              >
+                <LogOut className="size-4" />
+                退出登录
+              </button>
+            ) : (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <LogOut className="size-4 text-destructive shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-destructive">确认退出登录？</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      退出后需要重新登录才能继续使用
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmLogout(false)}
+                    className="flex-1 h-9 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-sm"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex-1 h-9 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-sm font-medium"
+                  >
+                    确认退出
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-between pt-2 border-t">
           <button
+            type="button"
             onClick={() => reset()}
             className="text-xs text-muted-foreground hover:text-destructive transition-colors"
           >
             恢复默认
           </button>
           <button
+            type="button"
             onClick={() => onOpenChange(false)}
             className="text-sm text-primary hover:underline"
           >
             完成
           </button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ==================== 退出登录确认对话框 ====================
-
-function LogoutConfirmDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const logout = useAuthStore((s) => s.logout)
-
-  const handleConfirm = () => {
-    onOpenChange(false)
-    logout()
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <div className="flex flex-col items-center text-center gap-3 py-2">
-          <div className="size-12 rounded-full bg-destructive/10 flex items-center justify-center">
-            <LogOut className="size-6 text-destructive" />
-          </div>
-          <h3 className="text-lg font-semibold">退出登录</h3>
-          <p className="text-sm text-muted-foreground">
-            确定要退出当前账号吗？退出后需要重新登录才能继续使用。
-          </p>
-          <div className="flex gap-2 w-full pt-2">
-            <button
-              onClick={() => onOpenChange(false)}
-              className="flex-1 h-9 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-sm"
-            >
-              取消
-            </button>
-            <button
-              onClick={handleConfirm}
-              className="flex-1 h-9 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-sm font-medium"
-            >
-              确认退出
-            </button>
-          </div>
         </div>
       </DialogContent>
     </Dialog>
