@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu, ArrowLeft, Search, UserCog, LogOut, MoreVertical, Pin, PinOff, Pencil, Settings } from 'lucide-react'
+import { Bot, User, Send, Plus, Trash2, Loader2, Wrench, ChevronDown, ChevronRight, MessageSquare, Mic, Square, X, Menu, ArrowLeft, Search, UserCog, LogOut, MoreVertical, Pin, PinOff, Pencil, Settings, Home } from 'lucide-react'
 import Link from 'next/link'
 import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
 import { useSettingsStore, FONT_SIZE_PX } from '@/stores/settings-store'
@@ -99,6 +99,7 @@ export function AgentChat() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null) // 当前打开菜单的会话 id
   const [renamingId, setRenamingId] = useState<string | null>(null)  // 当前重命名的会话 id
   const [renameValue, setRenameValue] = useState('')
@@ -434,6 +435,14 @@ export function AgentChat() {
               {user?.username || ''}
             </div>
           </div>
+          <Link
+            href="/app"
+            className="shrink-0 size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="返回首页"
+            aria-label="返回首页"
+          >
+            <Home className="size-4" />
+          </Link>
           <button
             onClick={() => setSettingsOpen(true)}
             className="shrink-0 size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -443,9 +452,10 @@ export function AgentChat() {
             <Settings className="size-4" />
           </button>
           <button
-            onClick={() => logout()}
+            onClick={(e) => { e.stopPropagation(); setLogoutConfirmOpen(true) }}
             className="shrink-0 size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
             title="退出登录"
+            type="button"
           >
             <LogOut className="size-4" />
           </button>
@@ -486,7 +496,7 @@ export function AgentChat() {
             aria-hidden
           />
         )}
-        {/* 顶部条 — 手机端：汉堡 + 返回 + 当前会话标题 */}
+        {/* 顶部条 — 手机端：汉堡 + 当前会话标题 */}
         <div className="sm:hidden h-14 flex items-center gap-1 px-3 border-b shrink-0">
           <Button
             variant="ghost"
@@ -497,13 +507,6 @@ export function AgentChat() {
           >
             <Menu className="size-5" />
           </Button>
-          <Link
-            href="/app"
-            className="shrink-0 flex items-center justify-center size-11 rounded-md hover:bg-muted transition-colors text-muted-foreground"
-            aria-label="返回"
-          >
-            <ArrowLeft className="size-5" />
-          </Link>
           <span className="text-lg font-semibold truncate flex-1 mr-2">
             {store.conversations.find(c => c.id === store.currentConversationId)?.title || 'AI Agent'}
           </span>
@@ -576,7 +579,7 @@ export function AgentChat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isRecording ? '请开始说话...' : enterToSend ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入消息，Ctrl+Enter 发送'}
+              placeholder={isRecording ? '请开始说话...' : '输入消息'}
               className={`flex-1 min-h-[44px] max-h-32 resize-none transition-colors ${isRecording ? 'border-red-500 bg-red-50/30' : ''}`}
               rows={1}
               disabled={store.streaming}
@@ -619,6 +622,9 @@ export function AgentChat() {
 
       {/* 设置弹窗 */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {/* 退出登录确认弹窗 */}
+      <LogoutConfirmDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen} />
     </div>
   )
 }
@@ -724,6 +730,47 @@ function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
           >
             完成
           </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ==================== 退出登录确认对话框 ====================
+
+function LogoutConfirmDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const logout = useAuthStore((s) => s.logout)
+
+  const handleConfirm = () => {
+    onOpenChange(false)
+    logout()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <div className="flex flex-col items-center text-center gap-3 py-2">
+          <div className="size-12 rounded-full bg-destructive/10 flex items-center justify-center">
+            <LogOut className="size-6 text-destructive" />
+          </div>
+          <h3 className="text-lg font-semibold">退出登录</h3>
+          <p className="text-sm text-muted-foreground">
+            确定要退出当前账号吗？退出后需要重新登录才能继续使用。
+          </p>
+          <div className="flex gap-2 w-full pt-2">
+            <button
+              onClick={() => onOpenChange(false)}
+              className="flex-1 h-9 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-sm"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleConfirm}
+              className="flex-1 h-9 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-sm font-medium"
+            >
+              确认退出
+            </button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
