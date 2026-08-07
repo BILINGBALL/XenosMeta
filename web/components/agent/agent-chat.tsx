@@ -1,6 +1,9 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
 import { useAgentStore } from '@/stores/agent-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui/button'
@@ -44,6 +47,7 @@ function highlightText(text: string, query: string): React.ReactNode {
 
 function MessageBubble({ msg, streaming, fontSizePx, autoExpandTools, searchQuery }: { msg: ChatDisplayMessage; streaming: boolean; fontSizePx: number; autoExpandTools: boolean; searchQuery?: string }) {
   const isUser = msg.role === 'user'
+  const renderMarkdown = !isUser && !!msg.content && !searchQuery?.trim()
 
   return (
     <div className={`flex flex-col gap-2 ${isUser ? 'items-end pl-10' : 'items-start'}`}>
@@ -54,14 +58,31 @@ function MessageBubble({ msg, streaming, fontSizePx, autoExpandTools, searchQuer
 
       {/* 文本内容 */}
       {msg.content ? (
-        <div className={`rounded-lg px-3.5 py-2.5 leading-relaxed ${
-          isUser
-            ? 'bg-primary text-primary-foreground max-w-full'
-            : 'bg-muted text-foreground w-full'
-        }`} style={{ fontSize: fontSizePx }}>
-          <div className="whitespace-pre-wrap break-words">
-            {searchQuery?.trim() ? highlightText(msg.content, searchQuery) : msg.content}
-          </div>
+        <div
+          className={`rounded-lg px-3.5 py-2.5 leading-relaxed ${
+            isUser
+              ? 'bg-primary text-primary-foreground max-w-full'
+              : 'bg-muted text-foreground w-full'
+          } ${renderMarkdown ? 'md-body' : ''}`}
+          style={{ fontSize: fontSizePx }}
+        >
+          {renderMarkdown ? (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+              components={{
+                a: ({ node: _node, ...props }) => (
+                  <a {...props} target="_blank" rel="noopener noreferrer" />
+                ),
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
+          ) : (
+            <div className="whitespace-pre-wrap break-words">
+              {searchQuery?.trim() ? highlightText(msg.content, searchQuery) : msg.content}
+            </div>
+          )}
         </div>
       ) : !isUser && streaming ? (
         <div className="flex items-center gap-1.5 text-muted-foreground px-2 py-2" style={{ fontSize: fontSizePx }}>
@@ -692,7 +713,7 @@ export function AgentChat() {
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
               </span>
               <span className="animate-pulse">正在聆听，请说话...</span>
-              <span className="ml-2 text-muted-foreground font-normal">（松开手指结束）</span>
+              <span className="ml-2 text-muted-foreground font-normal">（再次点击或松开手指结束）</span>
             </div>
           )}
           <div className="flex items-end gap-2">
