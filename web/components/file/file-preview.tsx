@@ -186,8 +186,17 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
     const isPdf = file.mimeType === 'application/pdf' || (file.filename || '').toLowerCase().endsWith('.pdf')
 
     if (token) {
-      if (isPdf) { setLoadedUrl(`${contentUrl}?_token=${encodeURIComponent(token)}`); setLoading(false) }
-      else fetch(contentUrl, { headers: { Authorization: `Bearer ${token}` } }).then(async r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); const b = await r.blob(); if (!cancelled) setLoadedUrl(URL.createObjectURL(b)) }).catch(e => { if (!cancelled) setError(e.message || '加载失败') }).finally(() => { if (!cancelled) setLoading(false) })
+      // PDF 通过 Authorization header 传 token（由 PdfPreview 通过 pdfjs 的 httpHeaders 发送）
+      // 非 PDF 文件则先用 fetch + Blob + objectURL 加载，避免 URL 泄漏 token
+      if (isPdf) {
+        setLoadedUrl(contentUrl)
+        setLoading(false)
+      } else {
+        fetch(contentUrl, { headers: { Authorization: `Bearer ${token}` } })
+          .then(async r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); const b = await r.blob(); if (!cancelled) setLoadedUrl(URL.createObjectURL(b)) })
+          .catch(e => { if (!cancelled) setError(e.message || '加载失败') })
+          .finally(() => { if (!cancelled) setLoading(false) })
+      }
     } else setLoadedUrl(contentUrl)
 
     store.getDownloadUrl(file.fileId).then(u => { if (!cancelled && u) setDownloadUrl(u) }).catch(() => {})
@@ -232,7 +241,7 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
     if (error) return <div className="flex flex-col items-center justify-center h-full gap-3"><FileTypeIcon mimeType={file.mimeType} filename={file.filename} className="size-12" /><p className="text-sm text-destructive">{error}</p><Button variant="outline" size="sm" onClick={handleDownload}><Download className="size-3.5 mr-1" />直接下载</Button></div>
     if (!loadedUrl) return <div className="flex items-center justify-center h-full"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>
 
-    if (previewType === 'pdf') return <PdfPreview url={loadedUrl!} file={file} />
+    if (previewType === 'pdf') return <PdfPreview url={loadedUrl!} file={file} authToken={token || undefined} />
 
     if (previewType === 'office') {
       return <OfficePreviewWrapper url={loadedUrl!} file={file} onDownload={handleDownload} />

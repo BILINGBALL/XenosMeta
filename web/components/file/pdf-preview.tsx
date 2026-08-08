@@ -7,16 +7,14 @@ import { displayFileName } from '@/lib/file-utils'
 import { Button } from '@/components/ui/button'
 import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs'
-
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3]
 const PAGE_GAP = 12
 const BUFFER = 1 // pre-render this many pages above/below viewport
 const CLEAR_DIST = 5 // clear canvases this far from viewport
 
-interface PdfPreviewProps { url: string; file: FileItem }
+interface PdfPreviewProps { url: string; file: FileItem; authToken?: string }
 
-export default function PdfPreview({ url, file }: PdfPreviewProps) {
+export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   const name = displayFileName(file)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pdfDocRef = useRef<any>(null)
@@ -34,7 +32,18 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
   const [pageHeights, setPageHeights] = useState<number[]>([])
   const [pageWidths, setPageWidths] = useState<number[]>([])
 
-  // ===== Load PDF + fetch all page sizes =====
+  /** 从错误消息中剥离 URL / JWT 等敏感信息，避免泄漏到 UI */
+  const sanitizeError = (msg: string | undefined): string => {
+    if (!msg) return '加载失败，请重试'
+    // 先替换整个 URL
+    let cleaned = msg.replace(/https?:\/\/[^\s]+/g, '[URL]')
+    // 干掉明显的 JWT (eyJ... 长串) 或 query 里的 _token=xxx
+    cleaned = cleaned.replace(/(?:_token|token|auth|authorization)=[A-Za-z0-9\-._~+/]+=*/gi, '[TOKEN]')
+    cleaned = cleaned.replace(/eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/g, '[JWT]')
+    return cleaned
+  }
+
+  // ===== 初始化 PDF worker + 加载文档 =====
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(''); setTotalPages(0); setCurrentPage(1)
@@ -43,9 +52,21 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
     canvasByPageRef.current.clear()
     pdfDocRef.current = null
 
+    // workerSrc 懒加载，避免模块初始化时加载竞争导致偶发失败
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs'
+
     const load = async () => {
       try {
-        const doc = await pdfjsLib.getDocument(url).promise
+        const headers: Record<string, string> = authToken
+          ? { Authorization: `Bearer ${authToken}` }
+          : {}
+        const doc = await pdfjsLib.getDocument({
+          url,
+          // 禁用范围内请求 + 使用请求头传 token，彻底避免 URL 带 token
+          httpHeaders: headers,
+          useSystemFonts: true,
+          withCredentials: false,
+        }).promise
         if (cancelled) return
         pdfDocRef.current = doc
         setTotalPages(doc.numPages)
@@ -68,13 +89,19 @@ export default function PdfPreview({ url, file }: PdfPreviewProps) {
         setLoading(false)
       } catch (err: any) {
         if (cancelled) return
-        setError(err?.message || '加载失败')
+        setError(sanitizeError(err?.message))
         setLoading(false)
       }
     }
     load()
-    return () => { cancelled = true }
-  }, [url])
+    return () => {
+      cancelled = true
+      if (pdfDocRef.current) {
+        try { pdfDocRef.current.destroy() } catch { /* ignore */ }
+        pdfDocRef.current = null
+      }
+    }
+  }, [url, authToken])
 
   // ===== Compute page widths and heights at a given zoom =====
   const computeDimensions = useCallback((z: number) => {
