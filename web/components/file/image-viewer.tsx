@@ -380,13 +380,17 @@ export function ImageViewer({
     // getMinContain 作为依赖：即便 useEffect 没写入成功，getMinContain 也能兜底
   }, [naturalSize.w, naturalSize.h, rotation, computeFitScale, getMinContain])
 
+  // 图片加载完成 / 旋转变化时，根据当前 fitMode 重新适配 scale
+  // ★ 注意：依赖数组故意不含 fitMode —— fitMode 变化是用户主动缩放（zoomOut/滚轮/键盘）的副作用，
+  // 此时 scale 已由用户操作设定，不应该被这里覆盖成 computeFitScale(fitMode)（否则 'original' 会把 scale 设成 1 → 闪一下原图大小）
   useEffect(() => {
     if (naturalSize.w > 0 && fitMode) {
       const s = computeFitScale(fitMode)
       setScale(s)
       setOffset({ x: 0, y: 0 })
     }
-  }, [naturalSize.w, naturalSize.h, rotation, fitMode, computeFitScale])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [naturalSize.w, naturalSize.h, rotation])
 
   // 缩放变化时钳制 offset（按钮/键盘/双击场景）
   useEffect(() => {
