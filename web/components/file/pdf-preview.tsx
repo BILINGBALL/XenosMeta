@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { type FileItem } from '@/stores/file-store'
 import { displayFileName } from '@/lib/file-utils'
@@ -24,6 +24,8 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   const canvasByPageRef = useRef<Map<number, { canvas: HTMLCanvasElement; zoom: number }>>(new Map())
   const genRef = useRef(0)
   const scrollAnchorRef = useRef<{ page: number; ratio: number } | null>(null)
+  // pinch 松手 commit 标记：true 时 changeZoom 不清 canvas，由 pageHeights useLayoutEffect 统一清
+  const pinchCommitRef = useRef(false)
 
   const [totalPages, setTotalPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -115,7 +117,8 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   }, [])
 
   // ===== Update heights + widths + page tops when zoom changes or PDF loads =====
-  useEffect(() => {
+  // 使用 useLayoutEffect 确保尺寸变更在 paint 前完成，避免闪烁
+  useLayoutEffect(() => {
     if (pageSizesRef.current.length === 0) return
     const { heights, widths } = computeDimensions(zoom)
     setPageHeights(heights)
@@ -127,7 +130,8 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   }, [zoom, computeDimensions, loading])
 
   // ===== After heights update: restore scroll + render visible =====
-  useEffect(() => {
+  // 使用 useLayoutEffect 确保滚动恢复 + transform 清除在 paint 前完成
+  useLayoutEffect(() => {
     if (pageHeights.length === 0) return
 
     // Restore scroll position after zoom change
@@ -138,6 +142,17 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
       const viewer = viewerRef.current
       if (viewer) viewer.scrollTop = top + ratio * h
       scrollAnchorRef.current = null
+    }
+
+    // pinch commit：此时 pageHeights 已更新到新 zoom，在同一同步帧内清 transform + 旧 canvas
+    // 浏览器不会 paint 中间状态 → 用户看到的是平滑过渡
+    if (pinchCommitRef.current) {
+      const c = contentRef.current
+      if (c) { c.style.transform = ''; c.style.transformOrigin = '' }
+      const viewer = viewerRef.current
+      canvasByPageRef.current.clear()
+      if (viewer) viewer.querySelectorAll('[data-pdf-ph]').forEach(el => { (el as HTMLElement).innerHTML = '' })
+      pinchCommitRef.current = false
     }
 
     // Render visible pages
@@ -279,9 +294,12 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
         }
       }
     }
-    // Clear all canvases (they're at old zoom)
-    canvasByPageRef.current.clear()
-    if (viewer) viewer.querySelectorAll('[data-pdf-ph]').forEach(el => { (el as HTMLElement).innerHTML = '' })
+    // pinch commit 时不清 canvas（transform 还在，旧 canvas 仍可见）
+    // 由 pageHeights useLayoutEffect 统一清
+    if (!pinchCommitRef.current) {
+      canvasByPageRef.current.clear()
+      if (viewer) viewer.querySelectorAll('[data-pdf-ph]').forEach(el => { (el as HTMLElement).innerHTML = '' })
+    }
     setZoom(newZoom)
   }, [pageHeights])
 
@@ -399,9 +417,15 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
     const te = () => {
       if (!pinchActive) return
       pinchActive = false
-      clearTransform()
       const finalZoom = Math.max(0.5, Math.min(3, Math.round(pZoom * curScale * 100) / 100))
-      if (Math.abs(finalZoom - zoom) >= 0.01) changeZoom(finalZoom)
+      if (Math.abs(finalZoom - zoom) >= 0.01) {
+        // 不清 transform！设置 commit 标记，让 pageHeights useLayoutEffect 在 paint 前统一清
+        // 这样 transform → 新 zoom 的切换在同一帧完成，无闪烁
+        pinchCommitRef.current = true
+        changeZoom(finalZoom)
+      } else {
+        clearTransform()
+      }
     }
     v.addEventListener('touchstart', ts, { passive: true })
     v.addEventListener('touchmove', tm, { passive: false })

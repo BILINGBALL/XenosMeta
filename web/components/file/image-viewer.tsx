@@ -60,6 +60,7 @@ export function ImageViewer({
 
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
+  const [isBouncing, setIsBouncing] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
 
   const [showControls, setShowControls] = useState(true)
@@ -102,6 +103,87 @@ export function ImageViewer({
     [naturalSize, rotation]
   )
 
+  /** 获取当前缩放和尺寸下 offset 的合法边界 [maxX, maxY]（正负对称） */
+  const getOffsetBounds = useCallback(
+    (s: number): { maxX: number; maxY: number } => {
+      const container = containerRef.current
+      if (!container || naturalSize.w === 0) return { maxX: 0, maxY: 0 }
+      const cw = container.clientWidth
+      const ch = container.clientHeight
+      const rotRad = (rotation * Math.PI) / 180
+      const cos = Math.abs(Math.cos(rotRad))
+      const sin = Math.abs(Math.sin(rotRad))
+      const dw = (naturalSize.w * cos + naturalSize.h * sin) * s
+      const dh = (naturalSize.w * sin + naturalSize.h * cos) * s
+      return {
+        maxX: dw > cw ? (dw - cw) / 2 : 0,
+        maxY: dh > ch ? (dh - ch) / 2 : 0,
+      }
+    },
+    [naturalSize, rotation]
+  )
+
+  /** 钳制 offset 到合法边界内（硬边界，非拖拽场景用） */
+  const clampOffset = useCallback(
+    (ox: number, oy: number, s: number): { x: number; y: number } => {
+      const { maxX, maxY } = getOffsetBounds(s)
+      return {
+        x: Math.min(Math.max(ox, -maxX), maxX),
+        y: Math.min(Math.max(oy, -maxY), maxY),
+      }
+    },
+    [getOffsetBounds]
+  )
+
+  /** 拖拽偏移带阻尼：超出边界后越拖越费力（给用户"到头了"的视觉反馈但不硬挡） */
+  const applyDampedOffset = useCallback(
+    (rawX: number, rawY: number, s: number): { x: number; y: number } => {
+      const { maxX, maxY } = getOffsetBounds(s)
+      const damp = (v: number, max: number) => {
+        if (max === 0) {
+          // 图片比容器小：任何偏移都带阻尼（拖出然后回弹）
+          const abs = Math.abs(v)
+          const damped = abs * 0.4 + (abs > 50 ? Math.log(abs - 49) * 6 : 0)
+          return v >= 0 ? Math.min(damped, 200) : -Math.min(damped, 200)
+        }
+        if (v > max) {
+          const over = v - max
+          const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
+          return max + Math.min(dampedOver, 180)
+        }
+        if (v < -max) {
+          const over = -max - v
+          const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
+          return -(max + Math.min(dampedOver, 180))
+        }
+        return v
+      }
+      return { x: damp(rawX, maxX), y: damp(rawY, maxY) }
+    },
+    [getOffsetBounds]
+  )
+
+  /** 松手时统一回弹：scale 低于最小值 → 回弹；offset 超出边界 → 钳制回弹 */
+  const bounceBackAll = useCallback(() => {
+    const minFit = computeFitScale('width')
+    const clamped = clampOffset(offset.x, offset.y, scale)
+    const needOffsetBounce =
+      Math.abs(clamped.x - offset.x) > 0.5 || Math.abs(clamped.y - offset.y) > 0.5
+    const needScaleBounce = scale < minFit - 0.001
+
+    if (!needOffsetBounce && !needScaleBounce) return
+
+    setIsBouncing(true)
+    if (needScaleBounce) {
+      setScale(minFit)
+      setOffset({ x: 0, y: 0 })
+      setFitMode('width')
+    } else {
+      setOffset(clamped)
+    }
+    setTimeout(() => setIsBouncing(false), 450)
+  }, [scale, offset, computeFitScale, clampOffset])
+
   const applyFitMode = useCallback(
     (mode: FitMode) => {
       setFitMode(mode)
@@ -132,6 +214,11 @@ export function ImageViewer({
     }
   }, [naturalSize.w, naturalSize.h, rotation])
 
+  // 缩放变化时钳制 offset（按钮/键盘/双击场景）
+  useEffect(() => {
+    setOffset((o) => clampOffset(o.x, o.y, scale))
+  }, [scale, clampOffset])
+
   const zoomAt = useCallback(
     (delta: number, cx?: number, cy?: number) => {
       const container = containerRef.current
@@ -146,16 +233,21 @@ export function ImageViewer({
         const px = cx - rect.left - container.clientWidth / 2
         const py = cy - rect.top - container.clientHeight / 2
         const ratio = newScale / oldScale
-        setOffset((o) => ({
-          x: px - (px - o.x) * ratio,
-          y: py - (py - o.y) * ratio,
-        }))
+        setOffset((o) => {
+          const raw = {
+            x: px - (px - o.x) * ratio,
+            y: py - (py - o.y) * ratio,
+          }
+          return clampOffset(raw.x, raw.y, newScale)
+        })
+      } else {
+        setOffset((o) => clampOffset(o.x, o.y, newScale))
       }
 
       setScale(newScale)
       setFitMode('original')
     },
-    [scale]
+    [scale, clampOffset]
   )
 
   const handleWheel = useCallback(
@@ -177,14 +269,15 @@ export function ImageViewer({
     if (!isDragging) return
 
     const handleMouseMove = (e: MouseEvent) => {
-      setOffset({
-        x: dragStartRef.current.ox + (e.clientX - dragStartRef.current.x),
-        y: dragStartRef.current.oy + (e.clientY - dragStartRef.current.y),
-      })
+      const rawX = dragStartRef.current.ox + (e.clientX - dragStartRef.current.x)
+      const rawY = dragStartRef.current.oy + (e.clientY - dragStartRef.current.y)
+      // 拖拽中允许超量拖动 + 阻尼，不硬钳制
+      setOffset(applyDampedOffset(rawX, rawY, scale))
     }
 
     const handleMouseUp = () => {
       setIsDragging(false)
+      bounceBackAll()
     }
 
     window.addEventListener('mousemove', handleMouseMove)
@@ -194,7 +287,7 @@ export function ImageViewer({
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging])
+  }, [isDragging, scale, applyDampedOffset, bounceBackAll])
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (scale <= computeFitScale('contain') + 0.01) {
@@ -230,10 +323,10 @@ export function ImageViewer({
   const handleTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length === 1 && isDragging) {
       e.preventDefault()
-      setOffset({
-        x: dragStartRef.current.ox + (e.touches[0].clientX - dragStartRef.current.x),
-        y: dragStartRef.current.oy + (e.touches[0].clientY - dragStartRef.current.y),
-      })
+      const rawX = dragStartRef.current.ox + (e.touches[0].clientX - dragStartRef.current.x)
+      const rawY = dragStartRef.current.oy + (e.touches[0].clientY - dragStartRef.current.y)
+      // 拖拽中允许超量拖动 + 阻尼，不硬钳制
+      setOffset(applyDampedOffset(rawX, rawY, scale))
     } else if (e.touches.length === 2) {
       e.preventDefault()
       const dist = getTouchDistance(e.touches)
@@ -255,6 +348,7 @@ export function ImageViewer({
     if (e.touches.length === 0) {
       setIsDragging(false)
       pinchRef.current.startDist = 0
+      bounceBackAll()
     } else if (e.touches.length === 1) {
       setIsDragging(true)
       dragStartRef.current = {
@@ -350,7 +444,9 @@ export function ImageViewer({
     setFitMode('original')
   }
   const zoomOut = () => {
-    setScale((s) => Math.max(minScale, s / 1.25))
+    // 按钮缩小不允许低于"适应宽度"
+    const minFit = computeFitScale('width')
+    setScale((s) => Math.max(minFit, s / 1.25))
     setFitMode('original')
   }
 
@@ -358,7 +454,12 @@ export function ImageViewer({
     const w = window.open('', '_blank')
     if (!w) return
     w.document.write(
-      `<!DOCTYPE html><html><head><title>${alt || '图片'}</title><style>body{margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#fff}img{max-width:100%;max-height:100vh;object-fit:contain}@media print{body{margin:0}img{max-width:100vw;max-height:100vh}}</style></head><body><img src="${src}" alt="${alt}" onload="window.print()" /></body></html>`
+      `<!DOCTYPE html><html><head><title>${alt || '图片'}</title><style>
+        @page { margin: 0; }
+        html, body { margin: 0; padding: 0; height: 100vh; overflow: hidden; }
+        body { display: flex; justify-content: center; align-items: center; background: #fff; }
+        img { max-width: 100vw; max-height: 100vh; object-fit: contain; page-break-inside: avoid; break-inside: avoid; }
+      </style></head><body><img src="${src}" alt="${alt}" onload="window.print()" /></body></html>`
     )
     w.document.close()
   }
@@ -378,12 +479,15 @@ export function ImageViewer({
 
   const imgTransform = `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px) scale(${scale}) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1}) rotate(${rotation}deg)`
 
-  const scalePercent = Math.round(scale * 100)
+  // 比例显示相对于"适应屏幕"（contain）的倍率，fit 时 = 100%，放大 = >100%
+  const fitScale = computeFitScale('contain')
+  const scalePercent = fitScale > 0 ? Math.round((scale / fitScale) * 100) : Math.round(scale * 100)
 
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full bg-muted/10 rounded-lg overflow-hidden select-none"
+      style={{ touchAction: 'none', cursor: isDragging ? 'grabbing' : scale > computeFitScale('contain') + 0.01 ? 'grab' : 'default' }}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={showControlsTemp}
@@ -395,7 +499,6 @@ export function ImageViewer({
       }}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      style={{ cursor: isDragging ? 'grabbing' : scale > computeFitScale('contain') + 0.01 ? 'grab' : 'default' }}
     >
       {loading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-20 bg-muted/20">
@@ -424,7 +527,9 @@ export function ImageViewer({
           transformOrigin: 'center center',
           willChange: 'transform',
           opacity: loading ? 0 : 1,
-          transition: loading ? 'opacity 0.2s ease' : 'none',
+          transition: isBouncing
+            ? 'transform 450ms cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease'
+            : (loading ? 'opacity 0.2s ease' : 'none'),
         }}
       />
 
@@ -459,7 +564,7 @@ export function ImageViewer({
               title="适应屏幕 (0)"
               className={fitMode === 'contain' ? 'bg-muted' : ''}
             >
-              <Maximize2 className="size-4" />
+              <Minimize2 className="size-4" />
             </Button>
             <Button
               variant="ghost"
@@ -468,7 +573,7 @@ export function ImageViewer({
               title="原始尺寸"
               className={fitMode === 'original' ? 'bg-muted' : ''}
             >
-              <Minimize2 className="size-4" />
+              <Maximize2 className="size-4" />
             </Button>
 
             <span className="w-px h-4 bg-border mx-1" />
