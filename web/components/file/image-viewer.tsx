@@ -62,6 +62,12 @@ export function ImageViewer({
   const [isDragging, setIsDragging] = useState(false)
   const [isBouncing, setIsBouncing] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
+  // ===== 惯性动画（和阻尼/回弹解耦，不修改它们的实现）=====
+  const velocityRef = useRef({ vx: 0, vy: 0 }) // 每 16ms 归一化的像素速度
+  const lastMoveRef = useRef({ x: 0, y: 0, t: 0 }) // 上一次 move 的采样点
+  const hasVelocityRef = useRef(false) // 是否已有速度样本（首次不做 EMA，避免低估）
+  const momentumRafRef = useRef<number | null>(null) // 惯性 rAF 句柄
+  const latestOffsetRef = useRef({ x: 0, y: 0 }) // 实时同步 offset，供惯性 rAF 旁路读取
 
   const [showControls, setShowControls] = useState(true)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -184,6 +190,92 @@ export function ImageViewer({
     setTimeout(() => setIsBouncing(false), 450)
   }, [scale, offset, computeFitScale, clampOffset])
 
+  // ===== 惯性（不修改阻尼/回弹逻辑，只在拖拽-松手之间多插一步滑行）=====
+  useEffect(() => {
+    latestOffsetRef.current = offset
+  }, [offset])
+
+  /** 停掉正在运行的惯性 rAF，并清空速度采样（用户按下/双指 pinch 时调用） */
+  const stopMomentum = useCallback(() => {
+    if (momentumRafRef.current != null) {
+      cancelAnimationFrame(momentumRafRef.current)
+      momentumRafRef.current = null
+    }
+    velocityRef.current = { vx: 0, vy: 0 }
+    hasVelocityRef.current = false
+  }, [])
+
+  /** 松手后按当前速度滑行，摩擦自然减速；结束后交给 bounceBackAll 处理超限/回弹 */
+  const startMomentum = useCallback(
+    (scaleAtRelease: number) => {
+      // 松手前停顿 >100ms → 视为用户有意停下，直接回弹
+      const stallDt = performance.now() - lastMoveRef.current.t
+      if (stallDt > 100) {
+        velocityRef.current = { vx: 0, vy: 0 }
+      }
+
+      // 先读速度（stopMomentum 会清零 velocityRef），再停 rAF
+      let { vx, vy } = velocityRef.current
+      if (momentumRafRef.current != null) {
+        cancelAnimationFrame(momentumRafRef.current)
+        momentumRafRef.current = null
+      }
+      velocityRef.current = { vx: 0, vy: 0 }
+      hasVelocityRef.current = false
+
+      const speed = Math.hypot(vx, vy)
+      if (speed < 0.3) {
+        // 速度太小 → 直接走回弹（下一帧再调用，保证 offset state 已更新）
+        requestAnimationFrame(() => bounceBackAll())
+        return
+      }
+
+      const friction = 0.945
+      const minSpeed = 0.05
+      let lastT = performance.now()
+      const step = () => {
+        const now = performance.now()
+        const dt = Math.min(50, now - lastT)
+        lastT = now
+        const decay = Math.pow(friction, dt / 16)
+        vx *= decay
+        vy *= decay
+
+        setOffset((prev) => {
+          const { maxX, maxY } = getOffsetBounds(scaleAtRelease)
+          // 拖拽可能把 prev 留在阻尼超限区域 → 先拉回合法范围再加速，避免第一帧跳变
+          const baseX = Math.min(Math.max(prev.x, -maxX), maxX)
+          const baseY = Math.min(Math.max(prev.y, -maxY), maxY)
+          let nx = baseX + vx * (dt / 16)
+          let ny = baseY + vy * (dt / 16)
+          let hitX = false
+          let hitY = false
+          if (maxX === 0) hitX = true
+          else if (nx > maxX) { nx = maxX; hitX = true }
+          else if (nx < -maxX) { nx = -maxX; hitX = true }
+          if (maxY === 0) hitY = true
+          else if (ny > maxY) { ny = maxY; hitY = true }
+          else if (ny < -maxY) { ny = -maxY; hitY = true }
+          if (hitX) vx = 0
+          if (hitY) vy = 0
+          latestOffsetRef.current = { x: nx, y: ny }
+          return { x: nx, y: ny }
+        })
+
+        const s = Math.hypot(vx, vy)
+        if (s < minSpeed) {
+          momentumRafRef.current = null
+          // 等 setOffset commit 后再走回弹判定（这样 bounceBackAll 读的 offset 是最新的）
+          requestAnimationFrame(() => bounceBackAll())
+          return
+        }
+        momentumRafRef.current = requestAnimationFrame(step)
+      }
+      momentumRafRef.current = requestAnimationFrame(step)
+    },
+    [getOffsetBounds, bounceBackAll]
+  )
+
   const applyFitMode = useCallback(
     (mode: FitMode) => {
       setFitMode(mode)
@@ -261,8 +353,11 @@ export function ImageViewer({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return
+    stopMomentum()
     setIsDragging(true)
     dragStartRef.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y }
+    lastMoveRef.current = { x: e.clientX, y: e.clientY, t: performance.now() }
+    hasVelocityRef.current = false
   }
 
   useEffect(() => {
@@ -271,13 +366,34 @@ export function ImageViewer({
     const handleMouseMove = (e: MouseEvent) => {
       const rawX = dragStartRef.current.ox + (e.clientX - dragStartRef.current.x)
       const rawY = dragStartRef.current.oy + (e.clientY - dragStartRef.current.y)
-      // 拖拽中允许超量拖动 + 阻尼，不硬钳制
+      // 拖拽中允许超量拖动 + 阻尼，不硬钳制（保留内容不动）
       setOffset(applyDampedOffset(rawX, rawY, scale))
+
+      // 速度采样 — 不影响拖拽本身的偏移计算
+      const now = performance.now()
+      const dt = now - lastMoveRef.current.t
+      if (dt > 0) {
+        const dx = e.clientX - lastMoveRef.current.x
+        const dy = e.clientY - lastMoveRef.current.y
+        const vxRaw = dx / (dt / 16)
+        const vyRaw = dy / (dt / 16)
+        if (!hasVelocityRef.current) {
+          velocityRef.current.vx = vxRaw
+          velocityRef.current.vy = vyRaw
+          hasVelocityRef.current = true
+        } else {
+          const alpha = 0.5
+          velocityRef.current.vx = velocityRef.current.vx * (1 - alpha) + vxRaw * alpha
+          velocityRef.current.vy = velocityRef.current.vy * (1 - alpha) + vyRaw * alpha
+        }
+      }
+      lastMoveRef.current = { x: e.clientX, y: e.clientY, t: now }
     }
 
+    const captureScale = scale
     const handleMouseUp = () => {
       setIsDragging(false)
-      bounceBackAll()
+      startMomentum(captureScale) // 有速度滑行，没速度直接 bounceBackAll
     }
 
     window.addEventListener('mousemove', handleMouseMove)
@@ -287,7 +403,7 @@ export function ImageViewer({
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, scale, applyDampedOffset, bounceBackAll])
+  }, [isDragging, scale, applyDampedOffset, startMomentum, stopMomentum])
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (scale <= computeFitScale('contain') + 0.01) {
@@ -300,6 +416,7 @@ export function ImageViewer({
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
+      stopMomentum()
       setIsDragging(true)
       dragStartRef.current = {
         x: e.touches[0].clientX,
@@ -307,6 +424,12 @@ export function ImageViewer({
         ox: offset.x,
         oy: offset.y,
       }
+      lastMoveRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        t: performance.now(),
+      }
+      hasVelocityRef.current = false
     }
   }
 
@@ -325,10 +448,35 @@ export function ImageViewer({
       e.preventDefault()
       const rawX = dragStartRef.current.ox + (e.touches[0].clientX - dragStartRef.current.x)
       const rawY = dragStartRef.current.oy + (e.touches[0].clientY - dragStartRef.current.y)
-      // 拖拽中允许超量拖动 + 阻尼，不硬钳制
+      // 拖拽中允许超量拖动 + 阻尼，不硬钳制（保留内容不动）
       setOffset(applyDampedOffset(rawX, rawY, scale))
+
+      // 速度采样（不影响偏移本身）
+      const now = performance.now()
+      const dt = now - lastMoveRef.current.t
+      if (dt > 0) {
+        const dx = e.touches[0].clientX - lastMoveRef.current.x
+        const dy = e.touches[0].clientY - lastMoveRef.current.y
+        const vxRaw = dx / (dt / 16)
+        const vyRaw = dy / (dt / 16)
+        if (!hasVelocityRef.current) {
+          velocityRef.current.vx = vxRaw
+          velocityRef.current.vy = vyRaw
+          hasVelocityRef.current = true
+        } else {
+          const alpha = 0.5
+          velocityRef.current.vx = velocityRef.current.vx * (1 - alpha) + vxRaw * alpha
+          velocityRef.current.vy = velocityRef.current.vy * (1 - alpha) + vyRaw * alpha
+        }
+      }
+      lastMoveRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        t: now,
+      }
     } else if (e.touches.length === 2) {
       e.preventDefault()
+      stopMomentum() // 双指缩放：停掉惯性
       const dist = getTouchDistance(e.touches)
       if (pinchRef.current.startDist > 0) {
         const ratio = dist / pinchRef.current.startDist
@@ -344,11 +492,12 @@ export function ImageViewer({
     }
   }
 
+  const captureTouchScale = scale
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length === 0) {
       setIsDragging(false)
       pinchRef.current.startDist = 0
-      bounceBackAll()
+      startMomentum(captureTouchScale) // 有速度滑行，没速度直接 bounceBackAll
     } else if (e.touches.length === 1) {
       setIsDragging(true)
       dragStartRef.current = {
@@ -358,11 +507,18 @@ export function ImageViewer({
         oy: offset.y,
       }
       pinchRef.current.startDist = 0
+      lastMoveRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        t: performance.now(),
+      }
+      hasVelocityRef.current = false
     }
   }
 
   const handleTouchStartPinch = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
+      stopMomentum() // 双指缩放：停掉惯性
       pinchRef.current = {
         startDist: getTouchDistance(e.touches),
         startScale: scale,
