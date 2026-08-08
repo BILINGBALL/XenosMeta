@@ -17,6 +17,7 @@ interface PdfPreviewProps { url: string; file: FileItem; authToken?: string }
 export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   const name = displayFileName(file)
   const viewerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const pdfDocRef = useRef<any>(null)
   const pageSizesRef = useRef<{ w: number; h: number }[]>([])
   const pageTopsRef = useRef<number[]>([])
@@ -359,27 +360,59 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   }, [zoom, changeZoom])
 
   // ===== Touch pinch zoom =====
+  // pinch 过程中用 CSS transform 做实时预览（GPU 加速），松手后才 commit 到真实 zoom
   useEffect(() => {
     const v = viewerRef.current
-    if (!v) return
+    const c = contentRef.current
+    if (!v || !c) return
     const td = (t: TouchList) => t.length < 2 ? 0 : Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
-    let pDist = 0, pZoom = 1, pinchActive = false
+    let pDist = 0, pZoom = 1, pinchActive = false, curScale = 1
+
+    const clearTransform = () => {
+      c.style.transform = ''
+      c.style.transformOrigin = ''
+    }
 
     const ts = (e: TouchEvent) => {
-      if (e.touches.length === 2) { pDist = td(e.touches); pZoom = zoom; pinchActive = true }
+      if (e.touches.length === 2) {
+        pDist = td(e.touches)
+        pZoom = zoom
+        curScale = 1
+        pinchActive = true
+        // 以双指中点为缩放原点（相对于 content 的坐标）
+        const rect = c.getBoundingClientRect()
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top
+        c.style.transformOrigin = `${midX}px ${midY}px`
+      }
     }
     const tm = (e: TouchEvent) => {
       if (!pinchActive || e.touches.length !== 2) return
       e.preventDefault()
       if (pDist <= 0) return
-      const nz = Math.max(0.5, Math.min(3, Math.round(pZoom * td(e.touches) / pDist * 100) / 100))
-      if (Math.abs(nz - zoom) >= 0.25) changeZoom(nz)
+      // 实时更新 CSS scale — 纯 GPU 合成，不触发 React 重渲染
+      const raw = td(e.touches) / pDist
+      // 确保 final zoom (pZoom * raw) 在 0.5~3 范围
+      curScale = Math.max(0.5 / pZoom, Math.min(3 / pZoom, raw))
+      c.style.transform = `scale(${curScale})`
     }
-    const te = () => { pinchActive = false }
+    const te = () => {
+      if (!pinchActive) return
+      pinchActive = false
+      clearTransform()
+      const finalZoom = Math.max(0.5, Math.min(3, Math.round(pZoom * curScale * 100) / 100))
+      if (Math.abs(finalZoom - zoom) >= 0.01) changeZoom(finalZoom)
+    }
     v.addEventListener('touchstart', ts, { passive: true })
     v.addEventListener('touchmove', tm, { passive: false })
     v.addEventListener('touchend', te, { passive: true })
-    return () => { v.removeEventListener('touchstart', ts); v.removeEventListener('touchmove', tm); v.removeEventListener('touchend', te) }
+    v.addEventListener('touchcancel', () => { pinchActive = false; clearTransform() }, { passive: true })
+    return () => {
+      v.removeEventListener('touchstart', ts)
+      v.removeEventListener('touchmove', tm)
+      v.removeEventListener('touchend', te)
+      v.removeEventListener('touchcancel', clearTransform)
+    }
   }, [zoom, changeZoom])
 
   // ===== Zoom buttons =====
@@ -413,25 +446,27 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
 
       {/* Viewer — scroll container with virtual placeholders */}
       <div ref={viewerRef} className="flex-1 min-h-0 overflow-auto overscroll-contain px-1 py-2">
-        {loading && !error && (
-          <div className="flex flex-col items-center justify-center gap-3 py-20">
-            <Loader2 className="size-8 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">加载 PDF...</span>
-          </div>
-        )}
-        {error && (
-          <div className="flex items-center justify-center py-20">
-            <p className="text-sm text-destructive">加载失败：{error}</p>
-          </div>
-        )}
-        {!loading && !error && pageHeights.map((h, i) => (
-          <div
-            key={i}
-            data-pdf-ph={i + 1}
-            style={{ height: `${h}px`, width: pageWidths[i] ? `${pageWidths[i]}px` : undefined }}
-            className="flex items-start"
-          />
-        ))}
+        <div ref={contentRef} className="origin-top-left will-change-transform">
+          {loading && !error && (
+            <div className="flex flex-col items-center justify-center gap-3 py-20">
+              <Loader2 className="size-8 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">加载 PDF...</span>
+            </div>
+          )}
+          {error && (
+            <div className="flex items-center justify-center py-20">
+              <p className="text-sm text-destructive">加载失败：{error}</p>
+            </div>
+          )}
+          {!loading && !error && pageHeights.map((h, i) => (
+            <div
+              key={i}
+              data-pdf-ph={i + 1}
+              style={{ height: `${h}px`, width: pageWidths[i] ? `${pageWidths[i]}px` : undefined }}
+              className="flex items-start"
+            />
+          ))}
+        </div>
       </div>
 
       {/* Mobile bottom bar — page nav */}
