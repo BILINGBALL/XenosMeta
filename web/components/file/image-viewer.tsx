@@ -147,33 +147,51 @@ export function ImageViewer({
   const applyDampedOffset = useCallback(
     (rawX: number, rawY: number, s: number): { x: number; y: number } => {
       const { maxX, maxY } = getOffsetBounds(s)
-      const damp = (v: number, max: number) => {
+      const container = containerRef.current
+      const cw = container?.clientWidth ?? 0
+      const ch = container?.clientHeight ?? 0
+      // 图片缩放后的显示宽高（考虑旋转）
+      const rotRad = (rotation * Math.PI) / 180
+      const cos = Math.abs(Math.cos(rotRad))
+      const sin = Math.abs(Math.sin(rotRad))
+      const dw = (naturalSize.w * cos + naturalSize.h * sin) * s
+      const dh = (naturalSize.w * sin + naturalSize.h * cos) * s
+      // 超限上限按图片显示尺寸的比例来，保证大图小图的回弹视觉比例一致
+      // 图比容器大：最多能拖出显示宽度的 12%，但不低于 180px（小图保底）
+      const overCapLarge = Math.max(180, Math.max(dw, dh) * 0.12)
+      // 图比容器小：最多能拖出容器尺寸的 20%，但不低于 200px
+      const overCapSmall = Math.max(200, Math.min(cw, ch) * 0.2)
+
+      const damp = (v: number, max: number, overCap: number) => {
         if (max === 0) {
-          // 图片比容器小：任何偏移都带阻尼（拖出然后回弹）
           const abs = Math.abs(v)
           const damped = abs * 0.4 + (abs > 50 ? Math.log(abs - 49) * 6 : 0)
-          return v >= 0 ? Math.min(damped, 200) : -Math.min(damped, 200)
+          return v >= 0 ? Math.min(damped, overCap) : -Math.min(damped, overCap)
         }
         if (v > max) {
           const over = v - max
           const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
-          return max + Math.min(dampedOver, 180)
+          return max + Math.min(dampedOver, overCap)
         }
         if (v < -max) {
           const over = -max - v
           const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
-          return -(max + Math.min(dampedOver, 180))
+          return -(max + Math.min(dampedOver, overCap))
         }
         return v
       }
-      return { x: damp(rawX, maxX), y: damp(rawY, maxY) }
+      return {
+        x: damp(rawX, maxX, maxX === 0 ? overCapSmall : overCapLarge),
+        y: damp(rawY, maxY, maxY === 0 ? overCapSmall : overCapLarge),
+      }
     },
-    [getOffsetBounds]
+    [getOffsetBounds, naturalSize, rotation]
   )
 
   /** 松手时统一回弹：scale 低于最小值 → 回弹；offset 超出边界 → 钳制回弹 */
   const bounceBackAll = useCallback(() => {
-    const minFit = computeFitScale('width')
+    // 最小基准用 'contain'（和初始加载一致），保证拖动后不会被强制放大到 width 模式
+    const minFit = computeFitScale('contain')
     const clamped = clampOffset(offset.x, offset.y, scale)
     const needOffsetBounce =
       Math.abs(clamped.x - offset.x) > 0.5 || Math.abs(clamped.y - offset.y) > 0.5
@@ -183,9 +201,10 @@ export function ImageViewer({
 
     setIsBouncing(true)
     if (needScaleBounce) {
+      // 仅当用户双指 pinch 缩到比 contain 还小时才回弹，正常拖动不会走到这里
       setScale(minFit)
       setOffset({ x: 0, y: 0 })
-      setFitMode('width')
+      setFitMode('contain')
     } else {
       setOffset(clamped)
     }
@@ -252,42 +271,21 @@ export function ImageViewer({
         const rawX = px + vx * dtFactor
         const rawY = py + vy * dtFactor
 
-        // 惯性过程中，对超限部分同样应用阻尼（和拖拽时一致），避免硬停止的突兀感
+        // 直接复用 applyDampedOffset（和拖拽时完全一致），避免重复实现和两边不一致
         const { maxX, maxY } = getOffsetBounds(scaleAtRelease)
-        const damp = (v: number, max: number) => {
-          if (max === 0) {
-            // 图片比容器小：任何偏移都带阻尼
-            const abs = Math.abs(v)
-            const damped = abs * 0.4 + (abs > 50 ? Math.log(abs - 49) * 6 : 0)
-            return v >= 0 ? Math.min(damped, 200) : -Math.min(damped, 200)
-          }
-          if (v > max) {
-            const over = v - max
-            const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
-            return max + Math.min(dampedOver, 180)
-          }
-          if (v < -max) {
-            const over = -max - v
-            const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
-            return -(max + Math.min(dampedOver, 180))
-          }
-          return v
-        }
-        const nx = damp(rawX, maxX)
-        const ny = damp(rawY, maxY)
+        const damped = applyDampedOffset(rawX, rawY, scaleAtRelease)
+        const nx = damped.x
+        const ny = damped.y
 
-        // 如果惯性位移（raw）尝试越界但被阻尼吃掉了大部分 → 对应方向速度快速衰减（不是立刻清零，避免突兀）
-        // 判定：raw 和阻尼后的值方向相同但差距大（说明被阻尼"拖住"了）
+        // 如果惯性位移（raw）尝试越界但被阻尼吃掉了大部分 → 对应方向速度快速衰减
         if (maxX > 0) {
           const rawOverX = rawX - maxX
           if (rawOverX > 0 && vx > 0) {
-            // 正在往右越界 → 把 vx 按阻尼比例减弱（35% 通过 = 65% 衰减）
             vx *= 0.35
           } else if (rawX < -maxX && vx < 0) {
             vx *= 0.35
           }
         } else {
-          // 图片比容器小：任何拖动都要快速衰减
           vx *= 0.4
         }
         if (maxY > 0) {
@@ -316,7 +314,7 @@ export function ImageViewer({
       }
       momentumRafRef.current = requestAnimationFrame(step)
     },
-    [getOffsetBounds, bounceBackAll]
+    [getOffsetBounds, bounceBackAll, applyDampedOffset]
   )
 
   const applyFitMode = useCallback(
@@ -652,8 +650,8 @@ export function ImageViewer({
     setFitMode('original')
   }
   const zoomOut = () => {
-    // 按钮缩小不允许低于"适应宽度"
-    const minFit = computeFitScale('width')
+    // 按钮缩小不允许低于"适应屏幕"（和初始加载一致）
+    const minFit = computeFitScale('contain')
     setScale((s) => Math.max(minFit, s / 1.25))
     setFitMode('original')
   }
