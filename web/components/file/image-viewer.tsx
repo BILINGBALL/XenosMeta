@@ -68,6 +68,8 @@ export function ImageViewer({
   const hasVelocityRef = useRef(false) // 是否已有速度样本（首次不做 EMA，避免低估）
   const momentumRafRef = useRef<number | null>(null) // 惯性 rAF 句柄
   const latestOffsetRef = useRef({ x: 0, y: 0 }) // 实时同步 offset，供惯性 rAF 旁路读取
+  // 记录松手时的偏移，确保惯性起点和松手瞬间一致（避免 React setState 异步导致的偏差）
+  const releaseOffsetRef = useRef({ x: 0, y: 0 })
 
   const [showControls, setShowControls] = useState(true)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -208,13 +210,13 @@ export function ImageViewer({
   /** 松手后按当前速度滑行，摩擦自然减速；结束后交给 bounceBackAll 处理超限/回弹 */
   const startMomentum = useCallback(
     (scaleAtRelease: number) => {
-      // 松手前停顿 >100ms → 视为用户有意停下，直接回弹
+      // 松手前停顿 >80ms → 视为用户有意停下，直接回弹
       const stallDt = performance.now() - lastMoveRef.current.t
-      if (stallDt > 100) {
+      if (stallDt > 80) {
         velocityRef.current = { vx: 0, vy: 0 }
       }
 
-      // 先读速度（stopMomentum 会清零 velocityRef），再停 rAF
+      // 先读速度，再停 rAF（stopMomentum 会清零 velocityRef）
       let { vx, vy } = velocityRef.current
       if (momentumRafRef.current != null) {
         cancelAnimationFrame(momentumRafRef.current)
@@ -224,43 +226,84 @@ export function ImageViewer({
       hasVelocityRef.current = false
 
       const speed = Math.hypot(vx, vy)
-      if (speed < 0.3) {
+      if (speed < 0.25) {
         // 速度太小 → 直接走回弹（下一帧再调用，保证 offset state 已更新）
         requestAnimationFrame(() => bounceBackAll())
         return
       }
 
-      const friction = 0.945
-      const minSpeed = 0.05
+      // 记录松手瞬间的位置，作为惯性起点（不主动拉回阻尼超限区域，避免跳变）
+      let px = releaseOffsetRef.current.x
+      let py = releaseOffsetRef.current.y
+
+      const friction = 0.925 // 更高摩擦 = 滑行更短
+      const minSpeed = 0.04
       let lastT = performance.now()
+
       const step = () => {
         const now = performance.now()
-        const dt = Math.min(50, now - lastT)
+        const dt = Math.min(48, now - lastT) // 更保守的 dt 上限
         lastT = now
         const decay = Math.pow(friction, dt / 16)
         vx *= decay
         vy *= decay
 
-        setOffset((prev) => {
-          const { maxX, maxY } = getOffsetBounds(scaleAtRelease)
-          // 拖拽可能把 prev 留在阻尼超限区域 → 先拉回合法范围再加速，避免第一帧跳变
-          const baseX = Math.min(Math.max(prev.x, -maxX), maxX)
-          const baseY = Math.min(Math.max(prev.y, -maxY), maxY)
-          let nx = baseX + vx * (dt / 16)
-          let ny = baseY + vy * (dt / 16)
-          let hitX = false
-          let hitY = false
-          if (maxX === 0) hitX = true
-          else if (nx > maxX) { nx = maxX; hitX = true }
-          else if (nx < -maxX) { nx = -maxX; hitX = true }
-          if (maxY === 0) hitY = true
-          else if (ny > maxY) { ny = maxY; hitY = true }
-          else if (ny < -maxY) { ny = -maxY; hitY = true }
-          if (hitX) vx = 0
-          if (hitY) vy = 0
-          latestOffsetRef.current = { x: nx, y: ny }
-          return { x: nx, y: ny }
-        })
+        const dtFactor = dt / 16
+        const rawX = px + vx * dtFactor
+        const rawY = py + vy * dtFactor
+
+        // 惯性过程中，对超限部分同样应用阻尼（和拖拽时一致），避免硬停止的突兀感
+        const { maxX, maxY } = getOffsetBounds(scaleAtRelease)
+        const damp = (v: number, max: number) => {
+          if (max === 0) {
+            // 图片比容器小：任何偏移都带阻尼
+            const abs = Math.abs(v)
+            const damped = abs * 0.4 + (abs > 50 ? Math.log(abs - 49) * 6 : 0)
+            return v >= 0 ? Math.min(damped, 200) : -Math.min(damped, 200)
+          }
+          if (v > max) {
+            const over = v - max
+            const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
+            return max + Math.min(dampedOver, 180)
+          }
+          if (v < -max) {
+            const over = -max - v
+            const dampedOver = over * 0.35 + (over > 40 ? Math.log(over - 39) * 5 : 0)
+            return -(max + Math.min(dampedOver, 180))
+          }
+          return v
+        }
+        const nx = damp(rawX, maxX)
+        const ny = damp(rawY, maxY)
+
+        // 如果惯性位移（raw）尝试越界但被阻尼吃掉了大部分 → 对应方向速度快速衰减（不是立刻清零，避免突兀）
+        // 判定：raw 和阻尼后的值方向相同但差距大（说明被阻尼"拖住"了）
+        if (maxX > 0) {
+          const rawOverX = rawX - maxX
+          if (rawOverX > 0 && vx > 0) {
+            // 正在往右越界 → 把 vx 按阻尼比例减弱（35% 通过 = 65% 衰减）
+            vx *= 0.35
+          } else if (rawX < -maxX && vx < 0) {
+            vx *= 0.35
+          }
+        } else {
+          // 图片比容器小：任何拖动都要快速衰减
+          vx *= 0.4
+        }
+        if (maxY > 0) {
+          if (rawY > maxY && vy > 0) {
+            vy *= 0.35
+          } else if (rawY < -maxY && vy < 0) {
+            vy *= 0.35
+          }
+        } else {
+          vy *= 0.4
+        }
+
+        px = nx
+        py = ny
+        latestOffsetRef.current = { x: nx, y: ny }
+        setOffset({ x: nx, y: ny })
 
         const s = Math.hypot(vx, vy)
         if (s < minSpeed) {
@@ -367,9 +410,12 @@ export function ImageViewer({
       const rawX = dragStartRef.current.ox + (e.clientX - dragStartRef.current.x)
       const rawY = dragStartRef.current.oy + (e.clientY - dragStartRef.current.y)
       // 拖拽中允许超量拖动 + 阻尼，不硬钳制（保留内容不动）
-      setOffset(applyDampedOffset(rawX, rawY, scale))
+      const damped = applyDampedOffset(rawX, rawY, scale)
+      latestOffsetRef.current = damped
+      setOffset(damped)
 
       // 速度采样 — 不影响拖拽本身的偏移计算
+      // 只采样最近的位移，不做过多历史平滑（alpha 更高 = 更看重最新速度）
       const now = performance.now()
       const dt = now - lastMoveRef.current.t
       if (dt > 0) {
@@ -382,7 +428,7 @@ export function ImageViewer({
           velocityRef.current.vy = vyRaw
           hasVelocityRef.current = true
         } else {
-          const alpha = 0.5
+          const alpha = 0.7 // 更激进：70% 新速度 + 30% 旧速度
           velocityRef.current.vx = velocityRef.current.vx * (1 - alpha) + vxRaw * alpha
           velocityRef.current.vy = velocityRef.current.vy * (1 - alpha) + vyRaw * alpha
         }
@@ -393,6 +439,8 @@ export function ImageViewer({
     const captureScale = scale
     const handleMouseUp = () => {
       setIsDragging(false)
+      // 记录松手瞬间的偏移：用 latestOffsetRef 避免 React 异步 setState 带来的偏差
+      releaseOffsetRef.current = { ...latestOffsetRef.current }
       startMomentum(captureScale) // 有速度滑行，没速度直接 bounceBackAll
     }
 
@@ -449,7 +497,9 @@ export function ImageViewer({
       const rawX = dragStartRef.current.ox + (e.touches[0].clientX - dragStartRef.current.x)
       const rawY = dragStartRef.current.oy + (e.touches[0].clientY - dragStartRef.current.y)
       // 拖拽中允许超量拖动 + 阻尼，不硬钳制（保留内容不动）
-      setOffset(applyDampedOffset(rawX, rawY, scale))
+      const damped = applyDampedOffset(rawX, rawY, scale)
+      latestOffsetRef.current = damped
+      setOffset(damped)
 
       // 速度采样（不影响偏移本身）
       const now = performance.now()
@@ -464,7 +514,7 @@ export function ImageViewer({
           velocityRef.current.vy = vyRaw
           hasVelocityRef.current = true
         } else {
-          const alpha = 0.5
+          const alpha = 0.7 // 更激进：70% 新速度 + 30% 旧速度
           velocityRef.current.vx = velocityRef.current.vx * (1 - alpha) + vxRaw * alpha
           velocityRef.current.vy = velocityRef.current.vy * (1 - alpha) + vyRaw * alpha
         }
@@ -497,6 +547,8 @@ export function ImageViewer({
     if (e.touches.length === 0) {
       setIsDragging(false)
       pinchRef.current.startDist = 0
+      // 记录松手瞬间的偏移：用 latestOffsetRef 避免 React 异步 setState 带来的偏差
+      releaseOffsetRef.current = { ...latestOffsetRef.current }
       startMomentum(captureTouchScale) // 有速度滑行，没速度直接 bounceBackAll
     } else if (e.touches.length === 1) {
       setIsDragging(true)
