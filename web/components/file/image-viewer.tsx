@@ -74,12 +74,12 @@ export function ImageViewer({
   const [showControls, setShowControls] = useState(true)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const minScale = 0.1 // 全局绝对最小值（滚轮/键盘极偶然场景才会用到）
+  const minScale = 0.1 // 全局绝对最小值（极个别场景兜底用）
   const maxScale = 20
   // ★ 统一的最小缩放基准 = contain 模式 scale（图片加载后/旋转后同步更新）
-  // 所有缩放下限、回弹基准都读这个值，绝不再各自 computeFitScale 避免基准漂移
-  const minContainScaleRef = useRef(1)
-  const minContainWidthScaleRef = useRef(1) // 仅用于百分比显示对比
+  // 初始值 0 = "未初始化"哨兵；所有读取必须通过 getMinContain() 做有效性检查+兜底
+  const minContainScaleRef = useRef(0)
+  const minContainWidthScaleRef = useRef(0)
 
   const computeFitScale = useCallback(
     (mode: FitMode): number => {
@@ -114,6 +114,24 @@ export function ImageViewer({
     },
     [naturalSize, rotation]
   )
+
+  /** ★ 唯一的最小基准读取入口：带有效性检查 + 实时兜底重算 + 写回，保证任何时机读到的都是合法值 */
+  const getMinContain = useCallback((): number => {
+    const cached = minContainScaleRef.current
+    // 合法条件：已初始化（>0）且不是"明显过大"（大图场景 contain 不可能超过 0.99）
+    if (cached > 0 && cached < 0.999) return cached
+    // 缓存无效 → 立刻实时计算，写回缓存，再返回
+    if (naturalSize.w > 0) {
+      const fresh = computeFitScale('contain')
+      if (fresh > 0) {
+        minContainScaleRef.current = fresh
+        minContainWidthScaleRef.current = computeFitScale('width')
+        return fresh
+      }
+    }
+    // 极端兜底：图片还没加载完成 → 退化为 1（不会被当作 contain 基准，随后加载完会立刻被 useEffect 覆盖）
+    return 1
+  }, [naturalSize, computeFitScale])
 
   /** 获取当前缩放和尺寸下 offset 的合法边界 [maxX, maxY]（正负对称） */
   const getOffsetBounds = useCallback(
@@ -194,8 +212,8 @@ export function ImageViewer({
 
   /** 松手时统一回弹：scale 低于最小值 → 回弹；offset 超出边界 → 钳制回弹 */
   const bounceBackAll = useCallback(() => {
-    // ★ 统一读基准 ref，确保和初始加载/旋转后的基准一致
-    const minFit = minContainScaleRef.current
+    // ★ 唯一入口 getMinContain：带有效性检查 + 实时兜底重算，首帧/任意时机读到的都合法
+    const minFit = getMinContain()
     const clamped = clampOffset(offset.x, offset.y, scale)
     const needOffsetBounce =
       Math.abs(clamped.x - offset.x) > 0.5 || Math.abs(clamped.y - offset.y) > 0.5
@@ -213,7 +231,7 @@ export function ImageViewer({
       setOffset(clamped)
     }
     setTimeout(() => setIsBouncing(false), 450)
-  }, [scale, offset, clampOffset])
+  }, [scale, offset, clampOffset, getMinContain])
 
   // ===== 惯性（不修改阻尼/回弹逻辑，只在拖拽-松手之间多插一步滑行）=====
   useEffect(() => {
@@ -343,17 +361,24 @@ export function ImageViewer({
     setError('图片加载失败')
   }
 
-  // ★ 同步更新最小 contain 基准（图片加载完成 / 旋转后立刻更新，保证后续所有操作读的是同一个值）
+  // ★ 同步最小 contain 基准（图片加载完成 / 旋转后，useLayoutEffect 保证在绘制前就写入 ref，避免首帧读到脏值）
   useEffect(() => {
-    if (naturalSize.w > 0 && containerRef.current) {
+    if (naturalSize.w > 0) {
+      // 不再强制要求 containerRef.current，即便容器瞬时无尺寸，后续 getMinContain 会兜底重算
       const containS = computeFitScale('contain')
       const widthS = computeFitScale('width')
-      minContainScaleRef.current = containS
-      minContainWidthScaleRef.current = widthS
-      // 如果当前 scale 低于新基准（比如旋转后基准变大），直接把 scale 拉回基准
-      setScale((prev) => Math.max(prev, containS))
+      // 只有合法值才写 ref（contain 不可能 ≤0，也不可能 ≥1 除非是小图，而大图场景 0.999 阈值可正确区分）
+      if (containS > 0) {
+        minContainScaleRef.current = containS
+        minContainWidthScaleRef.current = widthS
+        // scale 低于基准时才拉升，避免不必要的状态更新
+        if (containS < 0.999) {
+          setScale((prev) => (prev < containS ? containS : prev))
+        }
+      }
     }
-  }, [naturalSize.w, naturalSize.h, rotation, computeFitScale])
+    // getMinContain 作为依赖：即便 useEffect 没写入成功，getMinContain 也能兜底
+  }, [naturalSize.w, naturalSize.h, rotation, computeFitScale, getMinContain])
 
   useEffect(() => {
     if (naturalSize.w > 0 && fitMode) {
@@ -374,8 +399,8 @@ export function ImageViewer({
       if (!container) return
 
       const oldScale = scale
-      // ★ 滚轮缩放下限也统一为 contain 基准，防止松手回弹产生"被强制放大"的错觉
-      const wheelMin = minContainScaleRef.current
+      // ★ 滚轮缩放下限也统一为 contain 基准（用 getMinContain 防首帧脏值）
+      const wheelMin = getMinContain()
       const newScale = Math.max(wheelMin, Math.min(maxScale, oldScale + delta))
       if (newScale === oldScale) return
 
@@ -398,7 +423,7 @@ export function ImageViewer({
       setScale(newScale)
       setFitMode('original')
     },
-    [scale, clampOffset]
+    [scale, clampOffset, getMinContain]
   )
 
   const handleWheel = useCallback(
@@ -546,8 +571,8 @@ export function ImageViewer({
       const dist = getTouchDistance(e.touches)
       if (pinchRef.current.startDist > 0) {
         const ratio = dist / pinchRef.current.startDist
-        // ★ 双指缩放的下限也统一为 contain 基准，防止松手后回弹产生"突然变大"的错觉
-        const pinchMin = minContainScaleRef.current
+        // ★ 双指缩放下限用 getMinContain 防首帧脏值
+        const pinchMin = getMinContain()
         const newScale = Math.max(
           pinchMin,
           Math.min(maxScale, pinchRef.current.startScale * ratio)
@@ -612,7 +637,7 @@ export function ImageViewer({
         case '-':
         case '_':
           e.preventDefault()
-          setScale((s) => Math.max(minContainScaleRef.current, s / 1.2))
+          setScale((s) => Math.max(getMinContain(), s / 1.2))
           setFitMode('original')
           break
         case '0':
@@ -670,8 +695,8 @@ export function ImageViewer({
     setFitMode('original')
   }
   const zoomOut = () => {
-    // ★ 统一读基准 ref，和初始加载/旋转后的基准一致
-    const minFit = minContainScaleRef.current
+    // ★ 唯一入口 getMinContain：防首帧读到未初始化的脏值 1
+    const minFit = getMinContain()
     setScale((s) => Math.max(minFit, s / 1.25))
     setFitMode('original')
   }
