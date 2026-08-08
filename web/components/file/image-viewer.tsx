@@ -74,8 +74,12 @@ export function ImageViewer({
   const [showControls, setShowControls] = useState(true)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const minScale = 0.1
+  const minScale = 0.1 // 全局绝对最小值（滚轮/键盘极偶然场景才会用到）
   const maxScale = 20
+  // ★ 统一的最小缩放基准 = contain 模式 scale（图片加载后/旋转后同步更新）
+  // 所有缩放下限、回弹基准都读这个值，绝不再各自 computeFitScale 避免基准漂移
+  const minContainScaleRef = useRef(1)
+  const minContainWidthScaleRef = useRef(1) // 仅用于百分比显示对比
 
   const computeFitScale = useCallback(
     (mode: FitMode): number => {
@@ -190,8 +194,8 @@ export function ImageViewer({
 
   /** 松手时统一回弹：scale 低于最小值 → 回弹；offset 超出边界 → 钳制回弹 */
   const bounceBackAll = useCallback(() => {
-    // 最小基准用 'contain'（和初始加载一致），保证拖动后不会被强制放大到 width 模式
-    const minFit = computeFitScale('contain')
+    // ★ 统一读基准 ref，确保和初始加载/旋转后的基准一致
+    const minFit = minContainScaleRef.current
     const clamped = clampOffset(offset.x, offset.y, scale)
     const needOffsetBounce =
       Math.abs(clamped.x - offset.x) > 0.5 || Math.abs(clamped.y - offset.y) > 0.5
@@ -209,7 +213,7 @@ export function ImageViewer({
       setOffset(clamped)
     }
     setTimeout(() => setIsBouncing(false), 450)
-  }, [scale, offset, computeFitScale, clampOffset])
+  }, [scale, offset, clampOffset])
 
   // ===== 惯性（不修改阻尼/回弹逻辑，只在拖拽-松手之间多插一步滑行）=====
   useEffect(() => {
@@ -339,13 +343,25 @@ export function ImageViewer({
     setError('图片加载失败')
   }
 
+  // ★ 同步更新最小 contain 基准（图片加载完成 / 旋转后立刻更新，保证后续所有操作读的是同一个值）
+  useEffect(() => {
+    if (naturalSize.w > 0 && containerRef.current) {
+      const containS = computeFitScale('contain')
+      const widthS = computeFitScale('width')
+      minContainScaleRef.current = containS
+      minContainWidthScaleRef.current = widthS
+      // 如果当前 scale 低于新基准（比如旋转后基准变大），直接把 scale 拉回基准
+      setScale((prev) => Math.max(prev, containS))
+    }
+  }, [naturalSize.w, naturalSize.h, rotation, computeFitScale])
+
   useEffect(() => {
     if (naturalSize.w > 0 && fitMode) {
       const s = computeFitScale(fitMode)
       setScale(s)
       setOffset({ x: 0, y: 0 })
     }
-  }, [naturalSize.w, naturalSize.h, rotation])
+  }, [naturalSize.w, naturalSize.h, rotation, fitMode, computeFitScale])
 
   // 缩放变化时钳制 offset（按钮/键盘/双击场景）
   useEffect(() => {
@@ -358,7 +374,9 @@ export function ImageViewer({
       if (!container) return
 
       const oldScale = scale
-      const newScale = Math.max(minScale, Math.min(maxScale, oldScale + delta))
+      // ★ 滚轮缩放下限也统一为 contain 基准，防止松手回弹产生"被强制放大"的错觉
+      const wheelMin = minContainScaleRef.current
+      const newScale = Math.max(wheelMin, Math.min(maxScale, oldScale + delta))
       if (newScale === oldScale) return
 
       if (cx != null && cy != null) {
@@ -528,8 +546,10 @@ export function ImageViewer({
       const dist = getTouchDistance(e.touches)
       if (pinchRef.current.startDist > 0) {
         const ratio = dist / pinchRef.current.startDist
+        // ★ 双指缩放的下限也统一为 contain 基准，防止松手后回弹产生"突然变大"的错觉
+        const pinchMin = minContainScaleRef.current
         const newScale = Math.max(
-          minScale,
+          pinchMin,
           Math.min(maxScale, pinchRef.current.startScale * ratio)
         )
         if (newScale !== scale) {
@@ -592,7 +612,7 @@ export function ImageViewer({
         case '-':
         case '_':
           e.preventDefault()
-          setScale((s) => Math.max(minScale, s / 1.2))
+          setScale((s) => Math.max(minContainScaleRef.current, s / 1.2))
           setFitMode('original')
           break
         case '0':
@@ -650,8 +670,8 @@ export function ImageViewer({
     setFitMode('original')
   }
   const zoomOut = () => {
-    // 按钮缩小不允许低于"适应屏幕"（和初始加载一致）
-    const minFit = computeFitScale('contain')
+    // ★ 统一读基准 ref，和初始加载/旋转后的基准一致
+    const minFit = minContainScaleRef.current
     setScale((s) => Math.max(minFit, s / 1.25))
     setFitMode('original')
   }
