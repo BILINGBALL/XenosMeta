@@ -135,12 +135,15 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
     if (pageHeights.length === 0) return
 
     // Restore scroll position after zoom change
+    // ★ 排除 PAGE_GAP，以视口中心恢复
     if (scrollAnchorRef.current) {
       const { page, ratio } = scrollAnchorRef.current
       const top = pageTopsRef.current[page - 1] ?? 0
       const h = pageHeights[page - 1] ?? 0
+      const contentH = Math.max(0, h - PAGE_GAP)
+      const centerY = top + PAGE_GAP + ratio * contentH
       const viewer = viewerRef.current
-      if (viewer) viewer.scrollTop = top + ratio * h
+      if (viewer) viewer.scrollTop = centerY - viewer.clientHeight / 2
       scrollAnchorRef.current = null
     }
 
@@ -278,17 +281,22 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   }, [pageHeights, renderVisiblePages])
 
   // ===== Change zoom with scroll position preservation =====
+  // ★ 以视口中心为锚点，排除 PAGE_GAP 计算精确比例
   const changeZoom = useCallback((newZoom: number) => {
     const viewer = viewerRef.current
     if (viewer && pageHeights.length > 0) {
-      const st = viewer.scrollTop
-      // Find current page and ratio within it
+      // 用视口中心而非顶部作为锚点，更符合用户预期
+      const centerY = viewer.scrollTop + viewer.clientHeight / 2
       for (let i = 0; i < pageHeights.length; i++) {
         const top = pageTopsRef.current[i] ?? 0
-        if (top + pageHeights[i] > st) {
+        if (top + pageHeights[i] > centerY) {
+          // 排除 PAGE_GAP，计算在页面内容中的精确比例
+          const contentTop = top + PAGE_GAP
+          const contentH = pageHeights[i] - PAGE_GAP
+          const offset = Math.max(0, Math.min(contentH, centerY - contentTop))
           scrollAnchorRef.current = {
             page: i + 1,
-            ratio: pageHeights[i] > 0 ? (st - top) / pageHeights[i] : 0,
+            ratio: contentH > 0 ? offset / contentH : 0,
           }
           break
         }
@@ -419,8 +427,17 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
       pinchActive = false
       const finalZoom = Math.max(0.5, Math.min(3, Math.round(pZoom * curScale * 100) / 100))
       if (Math.abs(finalZoom - zoom) >= 0.01) {
-        // 不清 transform！设置 commit 标记，让 pageHeights useLayoutEffect 在 paint 前统一清
-        // 这样 transform → 新 zoom 的切换在同一帧完成，无闪烁
+        // ★ 清除 transform 前调整 scrollTop，使视觉位置不变
+        // transform: scale(s) origin (ox, oy) → 布局位置 y 视觉上在 oy + (y - oy) * s
+        // 视口顶部对应的布局位置 = oy + (scrollTop - oy) / s
+        if (Math.abs(curScale - 1) > 0.001) {
+          const oy = parseFloat(c.style.transformOrigin.split(' ')[1]) || 0
+          const visualTopY = oy + (v.scrollTop - oy) / curScale
+          c.style.transform = ''
+          c.style.transformOrigin = ''
+          v.scrollTop = visualTopY
+        }
+        // 设置 commit 标记，让 pageHeights useLayoutEffect 统一清 canvas
         pinchCommitRef.current = true
         changeZoom(finalZoom)
       } else {
