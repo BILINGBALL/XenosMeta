@@ -68,6 +68,7 @@ export function ImageViewer({
   const hasVelocityRef = useRef(false) // 是否已有速度样本（首次不做 EMA，避免低估）
   const momentumRafRef = useRef<number | null>(null) // 惯性 rAF 句柄
   const latestOffsetRef = useRef({ x: 0, y: 0 }) // 实时同步 offset，供惯性 rAF 旁路读取
+  const scaleRef = useRef(1) // 实时同步 scale，供 bounceBackAll 延迟调用读取最新值
   // 记录松手时的偏移，确保惯性起点和松手瞬间一致（避免 React setState 异步导致的偏差）
   const releaseOffsetRef = useRef({ x: 0, y: 0 })
 
@@ -211,19 +212,22 @@ export function ImageViewer({
   )
 
   /** 松手时统一回弹：scale 低于最小值 → 回弹；offset 超出边界 → 钳制回弹 */
+  // ★ 故意不依赖 scale/offset state（因为惯性结束时延迟调用的是旧闭包），
+  // 改为从 latestOffsetRef/scaleRef 读最新值，保证任何时候调用读到的都是当前实际位置
   const bounceBackAll = useCallback(() => {
-    // ★ 唯一入口 getMinContain：带有效性检查 + 实时兜底重算，首帧/任意时机读到的都合法
     const minFit = getMinContain()
-    const clamped = clampOffset(offset.x, offset.y, scale)
+    // ★ 从 ref 读最新的 offset/scale，而不是闭包中的 state（旧闭包的 state 是惯性开始前的值）
+    const curOffset = latestOffsetRef.current
+    const curScale = scaleRef.current
+    const clamped = clampOffset(curOffset.x, curOffset.y, curScale)
     const needOffsetBounce =
-      Math.abs(clamped.x - offset.x) > 0.5 || Math.abs(clamped.y - offset.y) > 0.5
-    const needScaleBounce = scale < minFit - 0.001
+      Math.abs(clamped.x - curOffset.x) > 0.5 || Math.abs(clamped.y - curOffset.y) > 0.5
+    const needScaleBounce = curScale < minFit - 0.001
 
     if (!needOffsetBounce && !needScaleBounce) return
 
     setIsBouncing(true)
     if (needScaleBounce) {
-      // 仅当用户双指 pinch 缩到比 contain 还小时才回弹，正常拖动不会走到这里
       setScale(minFit)
       setOffset({ x: 0, y: 0 })
       setFitMode('contain')
@@ -231,12 +235,16 @@ export function ImageViewer({
       setOffset(clamped)
     }
     setTimeout(() => setIsBouncing(false), 450)
-  }, [scale, offset, clampOffset, getMinContain])
+  }, [clampOffset, getMinContain])
 
   // ===== 惯性（不修改阻尼/回弹逻辑，只在拖拽-松手之间多插一步滑行）=====
   useEffect(() => {
     latestOffsetRef.current = offset
   }, [offset])
+
+  useEffect(() => {
+    scaleRef.current = scale
+  }, [scale])
 
   /** 停掉正在运行的惯性 rAF，并清空速度采样（用户按下/双指 pinch 时调用） */
   const stopMomentum = useCallback(() => {
