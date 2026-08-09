@@ -26,6 +26,7 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   const scrollAnchorRef = useRef<{ page: number; ratio: number } | null>(null)
   // pinch 松手 commit 标记：true 时 changeZoom 不清 canvas，由 pageHeights useLayoutEffect 统一清
   const pinchCommitRef = useRef(false)
+  const pinchOldZoomRef = useRef(1) // pinch commit 瞬间的旧 zoom，供 useLayoutEffect 按比例映射 scrollTop
 
   const [totalPages, setTotalPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -134,9 +135,27 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   useLayoutEffect(() => {
     if (pageHeights.length === 0) return
 
-    // Restore scroll position after zoom change
-    // ★ 排除 PAGE_GAP，以视口中心恢复
-    if (scrollAnchorRef.current) {
+    if (pinchCommitRef.current) {
+      // ★ Pinch commit：所见即所得 —— 直接按 newZoom/oldZoom 比例映射 scrollTop
+      // 保持 te() 已调好的视觉位置，不经过 anchor（避免重新计算带来的偏差）
+      const oldZ = pinchOldZoomRef.current
+      if (oldZ > 0) {
+        const viewer = viewerRef.current
+        if (viewer) {
+          const ratio = zoom / oldZ
+          // 视口中心的比例放大，确保用户视线点位置不变
+          const centerY = viewer.scrollTop + viewer.clientHeight / 2
+          viewer.scrollTop = centerY * ratio - viewer.clientHeight / 2
+        }
+      }
+      pinchCommitRef.current = false
+      const c = contentRef.current
+      if (c) { c.style.transform = ''; c.style.transformOrigin = '' }
+      const viewer = viewerRef.current
+      canvasByPageRef.current.clear()
+      if (viewer) viewer.querySelectorAll('[data-pdf-ph]').forEach(el => { (el as HTMLElement).innerHTML = '' })
+    } else if (scrollAnchorRef.current) {
+      // 按钮/滚轮/键盘缩放：按 anchor（视口中心的页面比例）恢复
       const { page, ratio } = scrollAnchorRef.current
       const top = pageTopsRef.current[page - 1] ?? 0
       const h = pageHeights[page - 1] ?? 0
@@ -145,17 +164,6 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
       const viewer = viewerRef.current
       if (viewer) viewer.scrollTop = centerY - viewer.clientHeight / 2
       scrollAnchorRef.current = null
-    }
-
-    // pinch commit：此时 pageHeights 已更新到新 zoom，在同一同步帧内清 transform + 旧 canvas
-    // 浏览器不会 paint 中间状态 → 用户看到的是平滑过渡
-    if (pinchCommitRef.current) {
-      const c = contentRef.current
-      if (c) { c.style.transform = ''; c.style.transformOrigin = '' }
-      const viewer = viewerRef.current
-      canvasByPageRef.current.clear()
-      if (viewer) viewer.querySelectorAll('[data-pdf-ph]').forEach(el => { (el as HTMLElement).innerHTML = '' })
-      pinchCommitRef.current = false
     }
 
     // Render visible pages
@@ -281,16 +289,15 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
   }, [pageHeights, renderVisiblePages])
 
   // ===== Change zoom with scroll position preservation =====
-  // ★ 以视口中心为锚点，排除 PAGE_GAP 计算精确比例
   const changeZoom = useCallback((newZoom: number) => {
     const viewer = viewerRef.current
-    if (viewer && pageHeights.length > 0) {
-      // 用视口中心而非顶部作为锚点，更符合用户预期
+    // pinch commit：te() 已把 scrollTop 调整到视觉位置，直接用这个位置按比例映射
+    if (!pinchCommitRef.current && viewer && pageHeights.length > 0) {
+      // 按钮/滚轮等非 pinch 场景：以视口中心为锚点，排除 PAGE_GAP 计算精确比例
       const centerY = viewer.scrollTop + viewer.clientHeight / 2
       for (let i = 0; i < pageHeights.length; i++) {
         const top = pageTopsRef.current[i] ?? 0
         if (top + pageHeights[i] > centerY) {
-          // 排除 PAGE_GAP，计算在页面内容中的精确比例
           const contentTop = top + PAGE_GAP
           const contentH = pageHeights[i] - PAGE_GAP
           const offset = Math.max(0, Math.min(contentH, centerY - contentTop))
@@ -302,8 +309,6 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
         }
       }
     }
-    // pinch commit 时不清 canvas（transform 还在，旧 canvas 仍可见）
-    // 由 pageHeights useLayoutEffect 统一清
     if (!pinchCommitRef.current) {
       canvasByPageRef.current.clear()
       if (viewer) viewer.querySelectorAll('[data-pdf-ph]').forEach(el => { (el as HTMLElement).innerHTML = '' })
@@ -437,7 +442,9 @@ export default function PdfPreview({ url, file, authToken }: PdfPreviewProps) {
           c.style.transformOrigin = ''
           v.scrollTop = visualTopY
         }
-        // 设置 commit 标记，让 pageHeights useLayoutEffect 统一清 canvas
+        // 设置 commit 标记并记录 commit 瞬间的旧 zoom
+        // useLayoutEffect 将按 newZoom/oldZoom 比例映射 scrollTop，保持所见即所得
+        pinchOldZoomRef.current = zoom
         pinchCommitRef.current = true
         changeZoom(finalZoom)
       } else {
