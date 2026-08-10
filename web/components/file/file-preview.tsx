@@ -222,11 +222,13 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
     }
     const a = document.createElement('a'); a.href = downloadUrl; a.download = name; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }, [downloadUrl, file])
-  const handleOpenNewTab = useCallback(async () => {
-    if (!file) return
-    const ext = file.filename.split('.').pop()?.toLowerCase() || ''
-    const isPdf = file.mimeType === 'application/pdf' || ext === 'pdf'
 
+  if (!file) return null
+  const previewType = getPreviewType(file.mimeType, file.filename)
+  const ext = (file.filename.split('.').pop() || '').toLowerCase()
+  const isPdf = previewType === 'pdf'
+
+  const handleOpenNewTab = useCallback(async () => {
     // HTML：用代理视图避免乱码
     if (ext === 'html' || ext === 'htm') {
       const htmlSrc = downloadUrl || loadedUrl || ''
@@ -236,6 +238,31 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
         : htmlSrc
       window.open(url, '_blank', 'noopener,noreferrer')
       return
+    }
+
+    // MD/文本/代码：blob 的 Content-Type 没有 charset=utf-8，浏览器默认按其他编码显示中文乱码
+    // → 读出来用 TextDecoder('utf-8') 强制解码再生成指定 charset 的 Blob
+    if (previewType === 'md' || previewType === 'text') {
+      try {
+        const src = loadedUrl
+        if (!src) throw new Error('no content')
+        // blob: URL 直接 fetch；如果是 API URL（理论上这类文件不会有，只有 PDF 有）带 auth header
+        const init: RequestInit = (!src.startsWith('blob:') && token)
+          ? { headers: { Authorization: `Bearer ${token}` } }
+          : {}
+        const r = await fetch(src, init)
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const buf = await r.arrayBuffer()
+        const text = new TextDecoder('utf-8').decode(buf)
+        const mimeType = previewType === 'md' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8'
+        const blob = new Blob([text], { type: mimeType })
+        const url = URL.createObjectURL(blob)
+        window.open(url, '_blank', 'noopener,noreferrer')
+        setTimeout(() => URL.revokeObjectURL(url), 60000)
+        return
+      } catch {
+        // fallback 到下方直接 open loadedUrl
+      }
     }
 
     // PDF：loadedUrl 是需要 Authorization header 的 API URL，直接新标签页打开会 401
@@ -255,19 +282,15 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
       }
     }
 
-    // 其他文件（图片/视频/音频/文本/office/md/csv/email）：优先用 blob 形式的 loadedUrl
-    // 浏览器会对能内联显示的类型（图片/视频/音频/文本/PDF blob）直接显示，
-    // 不能内联的（office/md/csv/email 等）自动触发下载 = 下载后在系统默认查看器打开
+    // 其他文件（图片/视频/音频/office/csv/email）：优先用 blob 形式的 loadedUrl
+    // 二进制文件不会有编码问题；浏览器能内联就内联，否则自动触发下载
     if (loadedUrl) {
       window.open(loadedUrl, '_blank', 'noopener,noreferrer')
       return
     }
     // 极端 fallback：下载链接
     if (downloadUrl) window.open(downloadUrl, '_blank', 'noopener,noreferrer')
-  }, [file, token, downloadUrl, loadedUrl])
-
-  if (!file) return null
-  const previewType = getPreviewType(file.mimeType, file.filename)
+  }, [file, previewType, ext, isPdf, token, downloadUrl, loadedUrl])
 
   const renderPreview = () => {
     if (loading) return <div className="flex flex-col items-center justify-center h-full gap-3"><Loader2 className="size-8 animate-spin text-muted-foreground" /><p className="text-sm text-muted-foreground">加载文件…</p></div>
