@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatSize, FileTypeIcon, getPreviewType, getLanguage, getPreviewLabel, displayFileName } from '@/lib/file-utils'
-import { Download, Copy, Check, Loader2, Eye, Code, ExternalLink } from 'lucide-react'
+import { Download, Loader2, Eye, Code, ExternalLink } from 'lucide-react'
 import PdfPreview from './pdf-preview'
 import { ImageViewer } from './image-viewer'
 import { MarkdownPreview } from './markdown-preview'
@@ -176,7 +176,6 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
   const apiBase = process.env.NEXT_PUBLIC_API_URL || ''
 
   useEffect(() => {
@@ -223,15 +222,18 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
     }
     const a = document.createElement('a'); a.href = downloadUrl; a.download = name; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }, [downloadUrl, file])
-  const handleCopyUrl = useCallback(async () => {
-    if (!downloadUrl || !file) return
+  const handleOpenNewTab = useCallback(() => {
+    if (!file) return
     const ext = file.filename.split('.').pop()?.toLowerCase() || ''
-    // HTML 文件：复制代理 URL，确保浏览器直接打开时不会乱码
-    const copyUrl = (ext === 'html' || ext === 'htm')
-      ? `${window.location.origin}/api/html-view?url=${encodeURIComponent(downloadUrl)}`
-      : downloadUrl
-    try { await navigator.clipboard.writeText(copyUrl); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch { const ta = document.createElement('textarea'); ta.value = copyUrl; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); setCopied(true); setTimeout(() => setCopied(false), 2000) }
-  }, [downloadUrl, file])
+    // 优先用后端签名好的 downloadUrl（浏览器新标签页可直接访问，无需额外 header）
+    let url = downloadUrl || loadedUrl || ''
+    if (!url) return
+    // HTML：用代理视图避免乱码
+    if ((ext === 'html' || ext === 'htm') && downloadUrl) {
+      url = `${window.location.origin}/api/html-view?url=${encodeURIComponent(downloadUrl)}`
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }, [file, downloadUrl, loadedUrl])
 
   if (!file) return null
   const previewType = getPreviewType(file.mimeType, file.filename)
@@ -286,12 +288,11 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
         <div className="flex-1 min-h-0 overflow-hidden">{renderPreview()}</div>
         {/* Footer */}
         <div className="shrink-0 flex items-center gap-1.5 px-2 sm:px-4 py-1.5 sm:py-2 border-t bg-muted/30">
-          <Button variant="outline" size="sm" onClick={handleCopyUrl} disabled={!downloadUrl} className="touch-manipulation h-8 sm:min-h-[44px] px-2 sm:px-3 text-[11px] sm:text-sm">
-            {copied ? <Check className="size-3.5 mr-1" /> : <Copy className="size-3.5 mr-1" />}
-            {copied ? '已复制' : '复制'}
-          </Button>
           <Button variant="outline" size="sm" onClick={handleDownload} disabled={!downloadUrl} className="touch-manipulation h-8 sm:min-h-[44px] px-2 sm:px-3 text-[11px] sm:text-sm">
             <Download className="size-3.5 mr-1" />下载
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleOpenNewTab} disabled={!downloadUrl && !loadedUrl} className="touch-manipulation h-8 sm:min-h-[44px] px-2 sm:px-3 text-[11px] sm:text-sm">
+            <ExternalLink className="size-3.5 mr-1" />新标签页查看
           </Button>
         </div>
       </DialogContent>
