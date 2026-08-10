@@ -223,12 +223,12 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
     const a = document.createElement('a'); a.href = downloadUrl; a.download = name; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }, [downloadUrl, file])
 
-  if (!file) return null
-  const previewType = getPreviewType(file.mimeType, file.filename)
-  const ext = (file.filename.split('.').pop() || '').toLowerCase()
-  const isPdf = previewType === 'pdf'
-
   const handleOpenNewTab = useCallback(async () => {
+    if (!file) return
+    const previewType = getPreviewType(file.mimeType, file.filename)
+    const ext = (file.filename.split('.').pop() || '').toLowerCase()
+    const isPdf = previewType === 'pdf'
+
     // HTML：用代理视图避免乱码
     if (ext === 'html' || ext === 'htm') {
       const htmlSrc = downloadUrl || loadedUrl || ''
@@ -290,7 +290,10 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
     }
     // 极端 fallback：下载链接
     if (downloadUrl) window.open(downloadUrl, '_blank', 'noopener,noreferrer')
-  }, [file, previewType, ext, isPdf, token, downloadUrl, loadedUrl])
+  }, [file, token, downloadUrl, loadedUrl])
+
+  if (!file) return null
+  const previewType = getPreviewType(file.mimeType, file.filename)
 
   const renderPreview = () => {
     if (loading) return <div className="flex flex-col items-center justify-center h-full gap-3"><Loader2 className="size-8 animate-spin text-muted-foreground" /><p className="text-sm text-muted-foreground">加载文件…</p></div>
