@@ -38,6 +38,20 @@ function processQueue(error: Error | null, token: string | null) {
 }
 
 /**
+ * Refresh 失败后，静默让所有 pending 请求"成功"返回 undefined。
+ * 如果用 reject，调用方若没有充分 try-catch 会变成 React 错误覆盖层（红屏），
+ * 尤其是并发请求时（多个 store 的 useEffect 同时触发），只有第一个 store 的
+ * try-catch 能兜底，其余会冒泡成未捕获异常。
+ * 做法：把所有 queued request 的 Authorization 清掉（无 token），
+ * 并直接 resolve 原始配置（apiClient 执行后大概率还是会失败，
+ * 因此改为返回 undefined，让调用方 `res?.data` 变成 undefined 即可）。
+ */
+function resolveQueueOnLogout() {
+  pendingQueue.forEach((p) => p.resolve('__logged_out__'))
+  pendingQueue = []
+}
+
+/**
  * 重置拦截器内部状态（isLoggedOut / isRefreshing / pendingQueue）。
  * 必须在用户重新登录成功后调用，否则上一次刷新失败留下的 isLoggedOut=true
  * 会导致后续所有 401 都直接跳过刷新逻辑，用户陷入"登录→15分钟后退出"死循环。
@@ -77,6 +91,12 @@ apiClient.interceptors.response.use(
       return new Promise<unknown>((resolve, reject) => {
         pendingQueue.push({
           resolve: (token: string) => {
+            // resolveQueueOnLogout 会传入 '__logged_out__'，表示 refresh 已失败、
+            // 用户已登出，此时不再重试原始请求（又会 401），直接返回 undefined
+            if (token === '__logged_out__') {
+              resolve(undefined)
+              return
+            }
             originalRequest.headers!.Authorization = `Bearer ${token}`
             resolve(apiClient(originalRequest))
           },
@@ -109,13 +129,24 @@ apiClient.interceptors.response.use(
       originalRequest.headers!.Authorization = `Bearer ${newAccessToken}`
       return apiClient(originalRequest)
     } catch (refreshError) {
-      console.error('[Auth] Refresh failed:', refreshError)
-      processQueue(refreshError as Error, null)
-      isLoggedOut = true
+      console.warn('[Auth] Refresh failed (login elsewhere or invalid refreshToken):',
+        refreshError instanceof Error ? refreshError.message : refreshError)
+
+      // 先执行 logout（它内部会调用 resetAuthInterceptors 把 isLoggedOut=false 等清掉）
       useAuthStore.getState().logout()
-      return Promise.reject(new Error('登录已过期，请重新登录'))
-    } finally {
+
+      // logout 会触发 resetAuthInterceptors → 把 isLoggedOut 重置成 false，
+      // 所以必须在 logout() 之后再设为 true，保证后续 401 不再进入刷新逻辑
+      isLoggedOut = true
       isRefreshing = false
+
+      // 静默释放所有 queued 请求：返回 undefined 而非 reject，避免冒泡成红屏
+      resolveQueueOnLogout()
+
+      // 原始请求也 resolve(undefined) 不 reject，让各 store 的 try-catch /
+      // optional chaining (res?.data) 自然兜底，UI 会因为 isLoggedIn=false
+      // 切换到未登录界面，不会出现报错 overlay
+      return undefined
     }
   }
 )
