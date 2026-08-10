@@ -222,18 +222,49 @@ export function FilePreview({ file, onClose }: FilePreviewProps) {
     }
     const a = document.createElement('a'); a.href = downloadUrl; a.download = name; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }, [downloadUrl, file])
-  const handleOpenNewTab = useCallback(() => {
+  const handleOpenNewTab = useCallback(async () => {
     if (!file) return
     const ext = file.filename.split('.').pop()?.toLowerCase() || ''
-    // 优先用后端签名好的 downloadUrl（浏览器新标签页可直接访问，无需额外 header）
-    let url = downloadUrl || loadedUrl || ''
-    if (!url) return
+    const isPdf = file.mimeType === 'application/pdf' || ext === 'pdf'
+
     // HTML：用代理视图避免乱码
-    if ((ext === 'html' || ext === 'htm') && downloadUrl) {
-      url = `${window.location.origin}/api/html-view?url=${encodeURIComponent(downloadUrl)}`
+    if (ext === 'html' || ext === 'htm') {
+      const htmlSrc = downloadUrl || loadedUrl || ''
+      if (!htmlSrc) return
+      const url = (downloadUrl)
+        ? `${window.location.origin}/api/html-view?url=${encodeURIComponent(downloadUrl)}`
+        : htmlSrc
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return
     }
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }, [file, downloadUrl, loadedUrl])
+
+    // PDF：loadedUrl 是需要 Authorization header 的 API URL，直接新标签页打开会 401
+    // → 带 header fetch 后生成 blob URL 再 open
+    if (isPdf && loadedUrl && !loadedUrl.startsWith('blob:')) {
+      try {
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined
+        const r = await fetch(loadedUrl, headers ? { headers } : {})
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const blob = await r.blob()
+        const url = URL.createObjectURL(blob)
+        window.open(url, '_blank', 'noopener,noreferrer')
+        setTimeout(() => URL.revokeObjectURL(url), 60000)
+        return
+      } catch {
+        // fetch 失败时 fallback 到 downloadUrl（会下载，但至少可用）
+      }
+    }
+
+    // 其他文件（图片/视频/音频/文本/office/md/csv/email）：优先用 blob 形式的 loadedUrl
+    // 浏览器会对能内联显示的类型（图片/视频/音频/文本/PDF blob）直接显示，
+    // 不能内联的（office/md/csv/email 等）自动触发下载 = 下载后在系统默认查看器打开
+    if (loadedUrl) {
+      window.open(loadedUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+    // 极端 fallback：下载链接
+    if (downloadUrl) window.open(downloadUrl, '_blank', 'noopener,noreferrer')
+  }, [file, token, downloadUrl, loadedUrl])
 
   if (!file) return null
   const previewType = getPreviewType(file.mimeType, file.filename)
