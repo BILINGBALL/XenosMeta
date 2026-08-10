@@ -1,7 +1,8 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''
+// 优先使用环境变量；如果没有设置，动态推导（与 index.html 的逻辑保持一致）
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001/api` : '')
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
@@ -36,6 +37,17 @@ function processQueue(error: Error | null, token: string | null) {
   pendingQueue = []
 }
 
+/**
+ * 重置拦截器内部状态（isLoggedOut / isRefreshing / pendingQueue）。
+ * 必须在用户重新登录成功后调用，否则上一次刷新失败留下的 isLoggedOut=true
+ * 会导致后续所有 401 都直接跳过刷新逻辑，用户陷入"登录→15分钟后退出"死循环。
+ */
+export function resetAuthInterceptors() {
+  isLoggedOut = false
+  isRefreshing = false
+  pendingQueue = []
+}
+
 apiClient.interceptors.response.use(
   (response) => response.data,
   async (error: AxiosError<{ message?: string }>) => {
@@ -54,7 +66,7 @@ apiClient.interceptors.response.use(
 
     const { refreshToken } = useAuthStore.getState()
     if (!refreshToken) {
-      // No refresh token — force logout once
+      console.warn('[Auth] 401 but no refreshToken in store — logging out')
       isLoggedOut = true
       useAuthStore.getState().logout()
       return Promise.reject(new Error('登录已过期，请重新登录'))
@@ -77,12 +89,19 @@ apiClient.interceptors.response.use(
     originalRequest._retry = true
 
     try {
+      console.log('[Auth] Token expired, attempting refresh →', `${BASE_URL}/user/refresh`)
       const { data } = await axios.post(`${BASE_URL}/user/refresh`, { refreshToken })
+      console.log('[Auth] Refresh response:', data)
+
       const newAccessToken = (data as { data?: { accessToken?: string } }).data?.accessToken
       const newRefreshToken = (data as { data?: { refreshToken?: string } }).data?.refreshToken
 
-      if (!newAccessToken) throw new Error('刷新失败')
+      if (!newAccessToken) {
+        console.error('[Auth] Refresh succeeded but no accessToken in response data:', data)
+        throw new Error('刷新失败')
+      }
 
+      console.log('[Auth] Refresh successful, updating tokens')
       useAuthStore.getState().setTokens(newAccessToken, newRefreshToken || refreshToken)
 
       processQueue(null, newAccessToken)
@@ -90,6 +109,7 @@ apiClient.interceptors.response.use(
       originalRequest.headers!.Authorization = `Bearer ${newAccessToken}`
       return apiClient(originalRequest)
     } catch (refreshError) {
+      console.error('[Auth] Refresh failed:', refreshError)
       processQueue(refreshError as Error, null)
       isLoggedOut = true
       useAuthStore.getState().logout()

@@ -183,7 +183,11 @@
   // Next.js build injection. Hardcoded value here. For local testing,
   // change it to http://localhost:3001/api manually.
   // ===================================================================
-  var API = 'https://www.oxth.com/api';
+  // 动态选择 API 地址：与 apiClient (.env.local NEXT_PUBLIC_API_URL) 保持一致
+  // 线上域名用 HTTPS，本地开发用当前 hostname + :3001 端口
+  var API = (window.location.hostname === 'www.oxth.com' || window.location.hostname === 'oxth.com')
+    ? 'https://www.oxth.com/api'
+    : 'http://' + window.location.hostname + ':3001/api';
 
   function $(id) { return document.getElementById(id); }
 
@@ -215,7 +219,9 @@
     } catch(e) {}
   }
 
-  // Async validate token validity; if expired, try refresh; if refresh fails, log out
+  // Async validate token validity; if expired, try refresh; if refresh fails, show logged-out UI but KEEP auth state
+  // — let the app's axios interceptor be the authoritative actor for final logout, so transient network errors
+  //   don't wipe a valid refresh token.
   function validateToken() {
     var raw;
     try { raw = localStorage.getItem('auth-core-auth'); } catch(e) { return; }
@@ -231,13 +237,25 @@
     }).then(function(r) {
       if (r.status === 401) {
         // Token expired — try refresh
-        if (!state.refreshToken) throw new Error('no refresh token');
+        if (!state.refreshToken) {
+          // Definitely no way to recover — clean state
+          try { localStorage.removeItem('auth-core-auth'); } catch(e) {}
+          showLoggedOutUI();
+          return;
+        }
         return fetch(API + '/user/refresh', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refreshToken: state.refreshToken })
         }).then(function(rr) {
-          if (!rr.ok) throw new Error('refresh failed');
+          if (!rr.ok) {
+            // Server rejected refresh (invalid/expired/revoked)
+            if (rr.status === 400 || rr.status === 401) {
+              try { localStorage.removeItem('auth-core-auth'); } catch(e) {}
+            }
+            // For 5xx/network-like statuses, keep state, just hide logged-in UI
+            throw new Error('refresh failed: ' + rr.status);
+          }
           return rr.json();
         }).then(function(d) {
           if (d && d.data && d.data.accessToken) {
@@ -251,8 +269,10 @@
       }
       if (!r.ok) throw new Error('validate failed: ' + r.status);
     }).catch(function() {
-      // Token invalid and refresh failed — clear auth state
-      try { localStorage.removeItem('auth-core-auth'); } catch(e) {}
+      // Transient network / 5xx errors: keep auth state intact. The app's axios interceptor
+      // has a more robust refresh flow (queueing, retries), and wiping localStorage here
+      // would log the user out unnecessarily — especially painful on flaky mobile networks.
+      // Only the UI is switched back; user can refresh page or app will retry on first API call.
       showLoggedOutUI();
     });
   }

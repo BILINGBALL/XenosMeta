@@ -139,7 +139,7 @@ class UserService {
 
     /**
      * 刷新 Access Token
-     * 使用有效的 refresh token 换取新的 access token
+     * 使用有效的 refresh token 换取新的 access token + 新的 refresh token（滑动过期）
      */
     async refreshAccessToken(refreshToken: string) {
         if (!refreshToken) {
@@ -161,15 +161,24 @@ class UserService {
             throw new AppError(401, 'refreshToken 已被撤销，请重新登录')
         }
 
-        // 签发新的 access token
-        const accessToken = generateAccessToken({
+        // 生成新的 token 对（refresh token 旋转，实现滑动过期）
+        const newAccessToken = generateAccessToken({
+            id: decoded.id,
+            username: decoded.username,
+            tenantId: decoded.tenantId ?? undefined,
+        })
+        const newRefreshToken = generateRefreshToken({
             id: decoded.id,
             username: decoded.username,
             tenantId: decoded.tenantId ?? undefined,
         })
 
+        // 新的 refresh token 覆盖写入 Redis，重置 TTL（前一个 refresh token 自然失效）
+        await redis.set(refreshKey, newRefreshToken, 'EX', REFRESH_TOKEN_TTL)
+
         return {
-            accessToken,
+            accessToken: newAccessToken,
+            refreshToken: newRefreshToken,
             expiresIn: '15m',
         }
     }
