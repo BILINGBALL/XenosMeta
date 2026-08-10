@@ -79,10 +79,19 @@ class OssCompatClient {
     return this.oss.put(objectName, buffer, { headers }) as any
   }
 
-  /** minio.getObject → oss.get (返回 stream) */
+  /** minio.getObject → oss.getStream (真流式，避免大文件全量读入内存) */
   async getObject(bucket: string, objectName: string): Promise<Readable> {
-    const result = await this.oss.get(objectName)
-    return Readable.from(result.content as Buffer)
+    const result = await this.oss.getStream(objectName)
+    return result.stream as Readable
+  }
+
+  /** minio.getPartialObject → oss.getStream + Range header (支持 PDF.js 分块请求) */
+  async getPartialObject(bucket: string, objectName: string, start: number, length: number): Promise<Readable> {
+    const end = start + length - 1
+    const result = await this.oss.getStream(objectName, {
+      headers: { Range: `bytes=${start}-${end}` },
+    })
+    return result.stream as Readable
   }
 
   /** minio.removeObject → oss.delete */
