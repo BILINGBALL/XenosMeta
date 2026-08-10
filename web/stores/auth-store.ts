@@ -111,10 +111,19 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         isLoggedIn: state.isLoggedIn,
       }),
-      onRehydrateStorage: () => (state) => {
+      onRehydrateStorage: () => (state, error) => {
         // Zustand v5: 直接修改 state.hasHydrated 不会触发重新渲染
         // 必须通过 set() 调用（即 store action）来更新
-        state?.setHasHydrated(true)
+        if (error) {
+          console.error('[Auth] Rehydration error:', error)
+        }
+        // 无论是否有 error，都要标记为已 hydrate，否则页面永久卡在加载中
+        if (state?.setHasHydrated) {
+          state.setHasHydrated(true)
+        } else {
+          // fallback: state 上没有 setHasHydrated（理论上不应发生），直接 setState
+          useAuthStore.setState({ hasHydrated: true })
+        }
       },
     }
   )

@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -9,6 +10,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
   const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const pathname = usePathname()
+
+  // 兜底：确保 hasHydrated 一定会被设为 true
+  // onRehydrateStorage 在某些时序场景下可能不触发，导致页面永久卡在"正在验证登录状态"
+  useEffect(() => {
+    if (!useAuthStore.getState().hasHydrated) {
+      useAuthStore.getState().setHasHydrated(true)
+    }
+  }, [])
 
   const navItems = [
     { href: '/app', label: '数据表格', icon: Table },
