@@ -56,6 +56,7 @@ function formatRecordPreview(
   data: Record<string, unknown> | null | undefined,
   fields: DynamicField[],
   refFieldIds: Set<string>,
+  attachmentFieldNames: Set<string>,
   labelMap: Record<string, string>,
 ): string {
   if (!data) return '—'
@@ -68,7 +69,11 @@ function formatRecordPreview(
     .map(([k, v]) => {
       const field = nameMap.get(k)
       let displayVal: string
-      if (field && refFieldIds.has(k)) {
+      if (field && attachmentFieldNames.has(k)) {
+        // 附件字段：显示附件数量，不 dump JSON
+        const refs = Array.isArray(v) ? v.filter((x: any) => typeof x === 'string' && x) : (typeof v === 'string' && v ? [v] : [])
+        displayVal = refs.length > 0 ? `📎 ${refs.length}个附件` : '—'
+      } else if (field && refFieldIds.has(k)) {
         const labelKey = `${k}:${coerceValue(v)}`
         displayVal = labelMap[labelKey] || coerceValue(v)
       } else {
@@ -81,9 +86,15 @@ function formatRecordPreview(
     + overflow
 }
 
-function buildDefaultValues(fieldList: DynamicField[]): Record<string, string> {
-  const vals: Record<string, string> = {}
-  for (const f of fieldList) vals[f.name] = defaultFieldValue(f.type, f.options ?? [])
+function buildDefaultValues(fieldList: DynamicField[]): Record<string, any> {
+  const vals: Record<string, any> = {}
+  for (const f of fieldList) {
+    if (f.type === 'attachment') {
+      vals[f.name] = []
+    } else {
+      vals[f.name] = defaultFieldValue(f.type, f.options ?? [])
+    }
+  }
   return vals
 }
 
@@ -499,7 +510,7 @@ export function TablePanel() {
   const [showCreateRecord, setShowCreateRecord] = useState(false)
   const [showEditRecord, setShowEditRecord] = useState<DynamicRecord | null>(null)
   const [showRecordDetail, setShowRecordDetail] = useState<DynamicRecord | null>(null)
-  const [rFormData, setRFormData] = useState<Record<string, string>>({})
+  const [rFormData, setRFormData] = useState<Record<string, any>>({})
   const [rTenantId, setRTenantId] = useState('')
 
   // mirror detail dialog
@@ -544,6 +555,12 @@ export function TablePanel() {
   const refFieldIds = useMemo(() => {
     const s = new Set<string>()
     for (const f of fields) { if (f.type === 'reference') s.add(f.name) }
+    return s
+  }, [fields])
+
+  const attachmentFieldNames = useMemo(() => {
+    const s = new Set<string>()
+    for (const f of fields) { if (f.type === 'attachment') s.add(f.name) }
     return s
   }, [fields])
 
@@ -823,14 +840,27 @@ export function TablePanel() {
     setShowEditRecord(r)
     store.fetchReferences(selectedTableId)
     const defaults = buildDefaultValues(fields)
-    if (r.data) for (const [k, v] of Object.entries(r.data)) defaults[k] = coerceValue(v)
+    if (r.data) for (const [k, v] of Object.entries(r.data)) {
+      if (attachmentFieldNames.has(k)) {
+        // 附件字段：保留数组，兼容旧的单值字符串
+        defaults[k] = Array.isArray(v) ? v.filter((x: any) => typeof x === 'string' && x) : (typeof v === 'string' && v ? [v] : [])
+      } else {
+        defaults[k] = coerceValue(v)
+      }
+    }
     setRFormData(defaults)
   }
   const openDetail = (r: DynamicRecord) => {
     setShowRecordDetail(r)
     store.fetchReferences(selectedTableId)
     const defaults = buildDefaultValues(fields)
-    if (r.data) for (const [k, v] of Object.entries(r.data)) defaults[k] = coerceValue(v)
+    if (r.data) for (const [k, v] of Object.entries(r.data)) {
+      if (attachmentFieldNames.has(k)) {
+        defaults[k] = Array.isArray(v) ? v.filter((x: any) => typeof x === 'string' && x) : (typeof v === 'string' && v ? [v] : [])
+      } else {
+        defaults[k] = coerceValue(v)
+      }
+    }
     setRFormData(defaults)
   }
 
@@ -1041,7 +1071,7 @@ export function TablePanel() {
                       {records.map((r) => (
                         <TableRow key={r.recordId}>
                           <TableCell className="font-mono text-xs">{r.recordId}</TableCell>
-                          <TableCell className="text-xs max-w-64 whitespace-pre-line">{formatRecordPreview(r.data, fields, refFieldIds, labelMap)}</TableCell>
+                          <TableCell className="text-xs max-w-64 whitespace-pre-line">{formatRecordPreview(r.data, fields, refFieldIds, attachmentFieldNames, labelMap)}</TableCell>
                           <TableCell>
                             <div className="flex gap-0.5">
                               <ActionButton variant="ghost" size="icon-sm" onClick={() => openDetail(r)} title="详情"><Eye className="h-3 w-3" /></ActionButton>
