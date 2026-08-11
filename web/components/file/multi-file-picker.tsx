@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatSize, FileTypeIcon, displayFileName } from '@/lib/file-utils'
-import { Search, Paperclip, X, ChevronDown, Loader2, Check, Eye, Plus, List } from 'lucide-react'
+import { Search, Paperclip, X, ChevronDown, Loader2, Check, Eye, Plus, List, Upload } from 'lucide-react'
 import type { FileItem as FileInfo } from '@/stores/file-store'
 import { AttachmentListDialog } from '@/components/file/attachment-list-dialog'
 
@@ -69,7 +69,9 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
   const [search, setSearch] = useState('')
   const [selectedTag, setSelectedTag] = useState('')
   const [allLoaded, setAllLoaded] = useState<FileItem[]>([])
+  const [uploading, setUploading] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 当前选中的 ref 列表（稳定引用，避免 effect 死循环）
   const refs = useMemo(() => normalizeList(value), [value])
@@ -238,6 +240,22 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
     setPreviewOpen(true)
   }, [])
 
+  // 上传新文件
+  const handleUploadFiles = useCallback(async (fileList: FileList) => {
+    const arr = Array.from(fileList)
+    if (arr.length === 0) return
+    setUploading(true)
+    const newRefs: string[] = []
+    for (const f of arr) {
+      const result = await useFileStore.getState().uploadFile(f)
+      if (result?.fileId) newRefs.push(result.fileId)
+    }
+    setUploading(false)
+    if (newRefs.length > 0) {
+      onChange([...refs, ...newRefs])
+    }
+  }, [refs, onChange])
+
   // —————— Display helpers ——————
 
   // readOnly / edit: 统一的预览 item
@@ -265,7 +283,16 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
           <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
         )}
 
-        <span className="truncate flex-1" title={name}>{name}</span>
+        {/* 文件名：可点击直接预览 */}
+        <button
+          type="button"
+          onClick={() => file && handlePreview(file as any)}
+          className="truncate flex-1 text-left hover:text-primary hover:underline disabled:cursor-default disabled:hover:text-current disabled:hover:no-underline"
+          title={file ? '点击预览' : name}
+          disabled={!file}
+        >
+          {name}
+        </button>
         {size > 0 && <span className="text-muted-foreground shrink-0 hidden sm:inline">{formatSize(size)}</span>}
 
         {/* Version selector (edit mode, 有版本时显示) */}
@@ -350,18 +377,41 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
           />
         )}
 
-        {/* 添加按钮 */}
+        {/* 添加 / 上传按钮 */}
         {!readOnly && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPickerOpen(true)}
-            className="h-10 text-xs shrink-0"
-            type="button"
-          >
-            <Plus className="size-3.5 mr-1" />
-            {refs.length === 0 ? '选择附件' : '添加'}
-          </Button>
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) handleUploadFiles(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPickerOpen(true)}
+              className="h-10 text-xs shrink-0"
+              type="button"
+            >
+              <Plus className="size-3.5 mr-1" />
+              {refs.length === 0 ? '选择附件' : '添加'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              className="h-10 text-xs shrink-0"
+              type="button"
+              disabled={uploading}
+            >
+              {uploading ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <Upload className="size-3.5 mr-1" />}
+              {uploading ? '上传中…' : '上传'}
+            </Button>
+          </>
         )}
       </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -9,7 +9,6 @@ import { useFileStore, type FileItem } from '@/stores/file-store'
 import { apiClient } from '@/lib/api-client'
 import { List, X, Paperclip, Eye } from 'lucide-react'
 import type { FileItem as FileInfo } from '@/stores/file-store'
-import dynamic from 'next/dynamic'
 
 export interface AttachmentListDialogProps {
   /** fileRef 列表，支持 'fileId' / 'fileId@V2' / 'fileId@VN' */
@@ -37,11 +36,6 @@ const versionLabel = (key: string) => {
   return key
 }
 
-const FilePreview = dynamic(
-  () => import('@/components/file/file-preview').then(m => m.FilePreview),
-  { ssr: false, loading: () => null }
-)
-
 export function AttachmentListDialog({
   refs,
   title = '附件列表',
@@ -52,20 +46,20 @@ export function AttachmentListDialog({
   onRemove,
 }: AttachmentListDialogProps) {
   const [open, setOpen] = useState(false)
-  const store = useFileStore()
-  const storeFiles = store.files
+  const storeFiles = useFileStore((s) => s.files)
 
   const [resolvedMap, setResolvedMap] = useState<Record<string, FileItem>>({})
-  const [previewIdx, setPreviewIdx] = useState<number | null>(null)
 
   // Resolve all refs (async fetch remote file info when not in store)
+  const refsKey = refs.join(',')
   useEffect(() => {
     let cancelled = false
-    for (const ref of refs) {
+    const currentRefs = refsKey ? refsKey.split(',').filter(Boolean) : []
+    for (const ref of currentRefs) {
       const { fileId } = parseFileRef(ref)
       if (!fileId || resolvedMap[ref]) continue
 
-      const inStore = storeFiles.find(f => f.fileId === fileId)
+      const inStore = useFileStore.getState().files.find(f => f.fileId === fileId)
       if (inStore) {
         setResolvedMap(prev => ({ ...prev, [ref]: inStore }))
         continue
@@ -99,22 +93,15 @@ export function AttachmentListDialog({
       })()
     }
     return () => { cancelled = true }
-  }, [refs, storeFiles, resolvedMap])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refsKey])
 
   const handlePreview = useCallback((idx: number) => {
-    setPreviewIdx(idx)
     const ref = refs[idx]
     const { fileId } = parseFileRef(ref)
-    const f = resolvedMap[ref] || storeFiles.find(x => x.fileId === fileId)
+    const f = resolvedMap[ref] || useFileStore.getState().files.find(x => x.fileId === fileId)
     if (f) onPreview?.(f as any)
-  }, [refs, resolvedMap, storeFiles, onPreview])
-
-  const previewFile = useMemo(() => {
-    if (previewIdx == null) return null
-    const ref = refs[previewIdx]
-    const { fileId } = parseFileRef(ref)
-    return (resolvedMap[ref] || storeFiles.find(x => x.fileId === fileId) || null) as any
-  }, [previewIdx, refs, resolvedMap, storeFiles])
+  }, [refs, resolvedMap, onPreview])
 
   // —————— Trigger UI ——————
   let triggerNode: React.ReactNode = null
@@ -226,11 +213,6 @@ export function AttachmentListDialog({
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* FilePreview 单文件预览 */}
-      {previewFile && (
-        <FilePreview file={previewFile} onClose={() => setPreviewIdx(null)} />
-      )}
     </>
   )
 }

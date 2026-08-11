@@ -50,7 +50,7 @@ interface FileState {
   // Active file list
   fetchFiles: (p?: number, sortBy?: string, sortOrder?: string) => Promise<void>
   fetchTags: () => Promise<void>
-  uploadFile: (file: File, tags?: string[], description?: string, displayName?: string) => Promise<boolean>
+  uploadFile: (file: File, tags?: string[], description?: string, displayName?: string) => Promise<FileItem | null>
   deleteFile: (fileId: string) => Promise<boolean>
   renameFile: (fileId: string, name: string) => Promise<boolean>
   updateFile: (fileId: string, data: { tags?: string[]; description?: string; filename?: string }) => Promise<boolean>
@@ -137,7 +137,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       if (description) formData.append('description', description)
       if (displayName) formData.append('displayName', displayName)
       const uploadHeaders: any = { 'Content-Type': undefined }
-      await apiClient.post('/file/upload', formData, {
+      const res: any = await apiClient.post('/file/upload', formData, {
         headers: uploadHeaders,
         transformRequest: [(d: any) => d],
         onUploadProgress: (e: ProgressEvent) => {
@@ -149,10 +149,11 @@ export const useFileStore = create<FileState>((set, get) => ({
       set({ uploadProgress: null })
       await get().fetchFiles(1)
       await get().fetchTags()
-      return true
+      const uploaded = res?.data?.data || res?.data || res
+      return (uploaded && uploaded.fileId) ? uploaded as FileItem : null
     } catch (e: any) {
       set({ error: e?.response?.data?.message || e.message || '上传失败', uploadProgress: null })
-      return false
+      return null
     }
   },
 
