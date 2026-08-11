@@ -61,8 +61,8 @@ const versionLabel = (key: string) => {
  */
 export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerProps) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
-  const store = useFileStore()
-  const { files, allTags } = store
+  const files = useFileStore((s) => s.files)
+  const allTags = useFileStore((s) => s.allTags)
 
   // Picker state
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -71,8 +71,9 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
   const [allLoaded, setAllLoaded] = useState<FileItem[]>([])
   const listRef = useRef<HTMLDivElement>(null)
 
-  // 当前选中的 ref 列表
-  const refs = normalizeList(value)
+  // 当前选中的 ref 列表（稳定引用，避免 effect 死循环）
+  const refs = useMemo(() => normalizeList(value), [value])
+  const refsKey = refs.join(',')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFile, setPreviewFile] = useState<FileInfo | null>(null)
 
@@ -83,18 +84,20 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
   // Resolve file info from store/remote
   const [resolvedMap, setResolvedMap] = useState<Record<string, FileItem>>({})
 
-  // Load store on mount
+  // Load store on mount only
   useEffect(() => {
     if (isLoggedIn) {
-      store.fetchFiles(1, 'createdAt', 'desc').catch(() => {})
-      store.fetchTags().catch(() => {})
+      const s = useFileStore.getState()
+      s.fetchFiles(1, 'createdAt', 'desc').catch(() => {})
+      s.fetchTags().catch(() => {})
     }
-  }, [isLoggedIn, store])
+  }, [isLoggedIn])
 
-  // Resolve each ref + load versions on mount
+  // Resolve each ref — only when refsKey changes
   useEffect(() => {
     let cancelled = false
-    for (const ref of refs) {
+    const currentRefs = refsKey ? refsKey.split(',').filter(Boolean) : []
+    for (const ref of currentRefs) {
       const { fileId } = parseFileRef(ref)
       if (!fileId) continue
 
@@ -102,7 +105,7 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
       if (resolvedMap[ref]) continue
 
       // Try store cache
-      const inStore = files.find(f => f.fileId === fileId)
+      const inStore = useFileStore.getState().files.find(f => f.fileId === fileId)
       if (inStore) {
         setResolvedMap(prev => ({ ...prev, [ref]: inStore }))
         continue
@@ -138,19 +141,20 @@ export function MultiFilePicker({ value, onChange, readOnly }: MultiFilePickerPr
       })()
     }
     return () => { cancelled = true }
-  }, [refs, files])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refsKey])
 
   // Load versions on demand (when user clicks select)
   const loadVersions = useCallback(async (fileId: string) => {
     if (versionMap[fileId] || versionLoading[fileId]) return
     setVersionLoading(prev => ({ ...prev, [fileId]: true }))
     try {
-      const list = await store.getVersions(fileId)
+      const list = await useFileStore.getState().getVersions(fileId)
       setVersionMap(prev => ({ ...prev, [fileId]: list }))
     } finally {
       setVersionLoading(prev => ({ ...prev, [fileId]: false }))
     }
-  }, [store, versionMap, versionLoading])
+  }, [versionMap, versionLoading])
 
   // When picker opens, fetch all files (paginated)
   useEffect(() => {
