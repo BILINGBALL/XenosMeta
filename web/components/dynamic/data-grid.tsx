@@ -16,7 +16,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, ArrowUpDown, Share2, Paperclip } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, ArrowUpDown, Share2, Paperclip, List } from 'lucide-react'
+import { AttachmentListDialog } from '@/components/file/attachment-list-dialog'
 
 // ===== Helpers =====
 
@@ -243,10 +244,9 @@ function ReferenceDetailDialog({
       )
     }
 
-    // Attachment field: resolve file info and show clickable preview
+    // Attachment field: resolve file info and show clickable preview (支持 list)
     if (sf?.type === 'attachment') {
-      const fileId = coerceValue(val)
-      return <AttachmentRefCell fileId={fileId} />
+      return <AttachmentListCell value={val} />
     }
 
     // Default: plain text
@@ -289,73 +289,39 @@ function ReferenceDetailDialog({
 // ===== Attachment Cell (resolves fileId to show filename + click to preview) =====
 
 function AttachmentRefCell({ fileId }: { fileId: string }) {
+  return <AttachmentListCell value={fileId} />
+}
+
+function normalizeAttachmentValue(v: unknown): string[] {
+  if (v === null || v === undefined || v === '') return []
+  if (typeof v === 'string') return [v]
+  if (Array.isArray(v)) {
+    return v.filter(x => typeof x === 'string' && x.length > 0)
+  }
+  return []
+}
+
+function AttachmentListCell({ value }: { value: unknown }) {
+  const refs = normalizeAttachmentValue(value)
   const fileStore = useFileStore()
-  const [filename, setFilename] = useState(fileId)
-  const [resolvedFile, setResolvedFile] = useState<any | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewFile, setPreviewFile] = useState<any | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    async function resolve() {
-      let found = false
-      // Try store first
-      const cached = useFileStore.getState().files.find(fc => fc.fileId === fileId)
-      if (cached) {
-        if (!cancelled) {
-          setFilename(displayFileName(cached))
-          setResolvedFile(cached)
-        }
-        found = true
-      }
-      if (!found) {
-        try {
-          const res: any = await apiClient.get(`/file/${fileId}`)
-          const fileData = ((res as any)?.data) || res
-          if (!cancelled && fileData) {
-            const resolved: FileItem = {
-              id: fileData.id || '',
-              fileId: fileData.fileId || fileId,
-              tenantId: fileData.tenantId || '',
-              bucket: fileData.bucket || '',
-              objectKey: fileData.objectKey || '',
-              filename: fileData.filename || fileId,
-              mimeType: fileData.mimeType || '',
-              size: fileData.size || 0,
-              currentVersion: fileData.currentVersion || 1,
-              tags: fileData.tags || [],
-              description: fileData.description || null,
-              uploadedBy: fileData.uploadedBy || null,
-              createdAt: fileData.createdAt || '',
-              updatedAt: fileData.updatedAt || '',
-            }
-            setFilename(resolved.filename)
-            setResolvedFile(resolved)
-          }
-        } catch { /* keep fileId fallback */ }
-      }
-    }
-    resolve()
-    return () => { cancelled = true }
-  }, [fileId])
-
-  const handleClick = () => {
-    if (resolvedFile) {
-      setPreviewOpen(true)
-    }
+  if (refs.length === 0) {
+    return <span className="text-muted-foreground text-xs">—</span>
   }
 
   return (
     <>
-      <button
-        onClick={handleClick}
-        className="inline-flex items-center gap-1.5 text-primary hover:underline text-sm font-medium cursor-pointer"
-        disabled={!resolvedFile}
-      >
-        <Paperclip className="size-3.5" />
-        <span className="truncate max-w-48">{filename}</span>
-      </button>
-      {previewOpen && resolvedFile && (
-        <FilePreview file={resolvedFile} onClose={() => setPreviewOpen(false)} />
+      <AttachmentListDialog
+        refs={refs}
+        title="附件列表"
+        triggerLabel={refs.length === 1 ? `1 个附件` : `${refs.length} 个附件`}
+        variant="badge"
+        readOnly
+        onPreview={(f: any) => setPreviewFile(f)}
+      />
+      {previewFile && (
+        <FilePreview file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
     </>
   )
@@ -590,16 +556,11 @@ export function DataGrid({ table, mirrorId }: DataGridProps) {
                             )
                           }
 
-                          // Attachment fields: show clickable preview button
+                          // Attachment fields: show clickable attachment list dialog
                           if (col.type === 'attachment') {
-                            const fileId = coerceValue(rawValue)
                             return (
                               <TableCell key={col.fieldId} className="max-w-48">
-                                {fileId ? (
-                                  <AttachmentRefCell fileId={fileId} />
-                                ) : (
-                                  <span className="text-muted-foreground text-xs">—</span>
-                                )}
+                                <AttachmentListCell value={rawValue} />
                               </TableCell>
                             )
                           }

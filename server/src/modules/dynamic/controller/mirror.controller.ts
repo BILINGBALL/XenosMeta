@@ -103,14 +103,16 @@ export class MirrorController {
 
         // 通过镜像的母表做 name ↔ fieldId 转换，但只暴露 visibleFields
         const mirror = await mirrorService.getMirror(mirrorId)
-        const fullFieldMap = await getFieldNameMap(mirror.sourceTableId, tenantId)
+        const fullFieldMapResult = await getFieldNameMap(mirror.sourceTableId, tenantId)
         const visibleFieldIds = new Set(mirror.visibleFields as string[])
         // 过滤 fieldMap：只保留 visibleFields 中的字段
         const fieldMap: Record<string, string> = {}
-        for (const [name, fid] of Object.entries(fullFieldMap)) {
+        for (const [name, fid] of Object.entries(fullFieldMapResult.nameToFid)) {
             if (visibleFieldIds.has(fid)) fieldMap[name] = fid
         }
-        result.items = convertIdToName(fieldMap, result.items) as any
+        // 保留 attachmentFieldIds 信息给 convertIdToName
+        const mapWithAttachments = { nameToFid: fieldMap, attachmentFieldIds: fullFieldMapResult.attachmentFieldIds }
+        result.items = convertIdToName(mapWithAttachments, result.items) as any
 
         res.json(success(result, '记录列表获取成功'))
     })
@@ -122,13 +124,14 @@ export class MirrorController {
         const record = await mirrorService.getRecord(mirrorId, recordId)
 
         const mirror = await mirrorService.getMirror(mirrorId)
-        const fullFieldMap = await getFieldNameMap(mirror.sourceTableId, tenantId)
+        const fullFieldMapResult = await getFieldNameMap(mirror.sourceTableId, tenantId)
         const visibleFieldIds = new Set(mirror.visibleFields as string[])
         const fieldMap: Record<string, string> = {}
-        for (const [name, fid] of Object.entries(fullFieldMap)) {
+        for (const [name, fid] of Object.entries(fullFieldMapResult.nameToFid)) {
             if (visibleFieldIds.has(fid)) fieldMap[name] = fid
         }
-        const data = convertIdToName(fieldMap, [record])
+        const mapWithAttachments = { nameToFid: fieldMap, attachmentFieldIds: fullFieldMapResult.attachmentFieldIds }
+        const data = convertIdToName(mapWithAttachments, [record])
 
         res.json(success(data[0], '记录详情获取成功'))
     })

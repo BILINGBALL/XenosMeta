@@ -21,7 +21,7 @@ import type { DynamicTable, DynamicField, DynamicRecord, FieldType, FieldReferen
 import { fetchList, postAction } from '@/lib/api-client'
 import { unwrapList } from '@/types'
 import { MirrorPanel } from '@/components/dynamic/mirror-panel'
-import { FilePicker } from '@/components/file/file-picker'
+import { MultiFilePicker } from '@/components/file/multi-file-picker'
 import { useGroupStore } from '@/stores/group-store'
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
@@ -255,8 +255,8 @@ function RecordForm({
   excludeRecordId,
 }: {
   fields: DynamicField[]
-  values: Record<string, string>
-  onChange?: (name: string, value: string) => void
+  values: Record<string, any>
+  onChange?: (name: string, value: any) => void
   readOnly?: boolean
   references: FieldReference[]
   excludeRecordId?: string
@@ -274,7 +274,7 @@ function RecordForm({
   return (
     <div className="space-y-3 max-h-96 overflow-auto pr-1">
       {fields.map((f) => {
-        const v = values[f.name] ?? ''
+        const v = values[f.name] ?? (f.type === 'attachment' ? [] : '')
         const fieldId = `rf-${f.fieldId}`
 
         if (f.type === 'reference') {
@@ -306,10 +306,15 @@ function RecordForm({
             return <FormField key={fieldId} label={f.name} id={fieldId} value={v} onChange={(x) => onChange?.(f.name, x)} placeholder={f.name} />
 
           case 'attachment': {
+            const vList = Array.isArray(v) ? v : (v ? [v] : [])
             return (
               <div key={fieldId} className="grid gap-1.5">
                 <Label>{f.name}</Label>
-                <FilePicker value={v} onChange={(x) => onChange?.(f.name, x)} readOnly={readOnly} />
+                <MultiFilePicker
+                  value={vList}
+                  onChange={(x) => onChange?.(f.name, x)}
+                  readOnly={readOnly}
+                />
               </div>
             )
           }

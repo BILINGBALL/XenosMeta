@@ -3,7 +3,7 @@ import prisma from '@config/db'
 import {dynamicService} from '../service/dynamic.service';
 import {groupService} from '../../auth-core/service/group.service';
 import {generateTableId, generateFieldId, generateRecordId, generateReferenceId} from '@utils/id-generator';
-import {convertIdToName, getFieldNameMap} from "@utils/dynamic.util";
+import {convertIdToName, getFieldNameMap, convertNameToFid} from "@utils/dynamic.util";
 import {success, fail, created, noContent} from '@utils/response'
 import {asyncHandler} from '@utils/async-handler'
 import {paginationSchema} from '@validators/common.validator'
@@ -170,8 +170,8 @@ export class DynamicController {
         // Convert sortField name to fieldId (JSONB key)
         let sortFieldId: string | undefined;
         if (sortField) {
-            const fieldMap = await getFieldNameMap(tableId, tenantId);
-            sortFieldId = fieldMap[sortField] || sortField;
+            const fieldMapResult = await getFieldNameMap(tableId, tenantId);
+            sortFieldId = fieldMapResult.nameToFid[sortField] || sortField;
         }
 
         const result = await dynamicService.getRecords(tableId, tenantId, groupIds, filter, page, pageSize, sortFieldId, sortOrder);
@@ -204,12 +204,9 @@ export class DynamicController {
         }
         if (!groupId) throw new AppError(400, '无法确定群组：请先分配群组或指定 groupId');
         await requireGroupMembership(req, tenantId, groupId);
-        const fieldMap = await getFieldNameMap(tableId, tenantId);
-        const convertedData: Record<string, any> = {};
-        for (const key in data) {
-            const fid = fieldMap[key] || key;
-            convertedData[fid] = data[key];
-        }
+        const fieldMapResult = await getFieldNameMap(tableId, tenantId);
+        const convertedData = convertNameToFid(data || {}, fieldMapResult);
+
         const result = await dynamicService.createRecord({
             recordId: generateRecordId(), tableId: tableId, tenantId, groupId,
             data: convertedData, description: req.body.description, createdBy: userId,
@@ -223,12 +220,8 @@ export class DynamicController {
         const {tableId, recordId} = req.params;
 
         const {data} = req.body;
-        const fieldMap = await getFieldNameMap(tableId, tenantId);
-        const convertedData: Record<string, any> = {};
-        for (const key in data) {
-            const fid = fieldMap[key] || key;
-            convertedData[fid] = data[key];
-        }
+        const fieldMapResult = await getFieldNameMap(tableId, tenantId);
+        const convertedData = convertNameToFid(data || {}, fieldMapResult);
 
         // 校验自引用：不允许 reference 字段的值指向正在编辑的记录自身
         const tableFields = await prisma.dynamicField.findMany({
@@ -243,7 +236,7 @@ export class DynamicController {
         }
 
         const result = await dynamicService.updateRecord(recordId, tableId, {data: convertedData, description: req.body.description});
-        const convertedResult = convertIdToName(fieldMap, [result])[0];
+        const convertedResult = convertIdToName(fieldMapResult, [result])[0];
         res.json(success(convertedResult, "记录更新成功"));
     }
 
