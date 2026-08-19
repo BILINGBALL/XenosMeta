@@ -7,6 +7,7 @@
     "start": "node -r tsconfig-paths/register dist/app.js",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:gen": "prisma generate",
+    "seed": "ts-node -r tsconfig-paths/register scripts/seed.ts",
     "init:system": "ts-node scripts/initialize-system-admin.ts",
     "init:admin": "ts-node scripts/initialize-admin.ts",
     "demo:exp": "ts-node scripts/demo-experience-tenant.ts",
